@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8f747e55-6d62-45e2-a48c-50ee155b0921",
+  "path": "azure-cost",
+  "path_key": "azure-cost",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "microsoft/azure-skills/azure-cost",
+    "subpath": "skills/azure-cost",
+    "branch": null
+  }
+}

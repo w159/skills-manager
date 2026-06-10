@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "3ea7d27b-8538-48e8-90a6-3f9277a872cc",
+  "path": "opentui",
+  "path_key": "opentui",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "msmps/opentui-skill/opentui",
+    "subpath": "skill/opentui",
+    "branch": null
+  }
+}

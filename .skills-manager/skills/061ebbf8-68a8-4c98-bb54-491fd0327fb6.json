@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "061ebbf8-68a8-4c98-bb54-491fd0327fb6",
+  "path": "clerk-testing",
+  "path_key": "clerk-testing",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "clerk/skills/clerk-testing",
+    "subpath": "skills/features/clerk-testing",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "702e7ad3-0271-4dfa-87ab-54f654a15e15",
+  "path": "clerk-backend-api",
+  "path_key": "clerk-backend-api",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "clerk/skills/clerk-backend-api",
+    "subpath": "skills/core/clerk-backend-api",
+    "branch": null
+  }
+}

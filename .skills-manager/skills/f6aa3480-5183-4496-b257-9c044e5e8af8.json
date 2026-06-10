@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f6aa3480-5183-4496-b257-9c044e5e8af8",
+  "path": "azure-rbac",
+  "path_key": "azure-rbac",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "microsoft/azure-skills/azure-rbac",
+    "subpath": "skills/azure-rbac",
+    "branch": null
+  }
+}

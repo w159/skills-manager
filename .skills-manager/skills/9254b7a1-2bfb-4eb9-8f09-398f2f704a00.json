@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9254b7a1-2bfb-4eb9-8f09-398f2f704a00",
+  "path": "clerk-custom-ui",
+  "path_key": "clerk-custom-ui",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "clerk/skills/clerk-custom-ui",
+    "subpath": "skills/core/clerk-custom-ui",
+    "branch": null
+  }
+}

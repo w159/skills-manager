@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "4f4e0dd3-e925-4f1c-9798-39d3b64fac69",
+  "path": "ui-ux-pro-max",
+  "path_key": "ui-ux-pro-max",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "nextlevelbuilder/ui-ux-pro-max-skill/ui-ux-pro-max",
+    "subpath": ".claude/skills/ui-ux-pro-max",
+    "branch": null
+  }
+}

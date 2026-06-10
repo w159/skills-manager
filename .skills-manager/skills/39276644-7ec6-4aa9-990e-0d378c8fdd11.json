@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "39276644-7ec6-4aa9-990e-0d378c8fdd11",
+  "path": "entra-app-registration",
+  "path_key": "entra-app-registration",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "microsoft/azure-skills/entra-app-registration",
+    "subpath": "skills/entra-app-registration",
+    "branch": null
+  }
+}

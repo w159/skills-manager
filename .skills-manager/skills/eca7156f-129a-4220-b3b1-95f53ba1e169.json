@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "eca7156f-129a-4220-b3b1-95f53ba1e169",
+  "path": "azure-cost-optimization",
+  "path_key": "azure-cost-optimization",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "microsoft/azure-skills/azure-cost-optimization",
+    "subpath": "skills",
+    "branch": null
+  }
+}

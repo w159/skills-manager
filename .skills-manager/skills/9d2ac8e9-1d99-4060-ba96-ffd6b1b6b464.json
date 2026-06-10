@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9d2ac8e9-1d99-4060-ba96-ffd6b1b6b464",
+  "path": "pdf",
+  "path_key": "pdf",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "anthropics/skills/pdf",
+    "subpath": "skills/pdf",
+    "branch": null
+  }
+}

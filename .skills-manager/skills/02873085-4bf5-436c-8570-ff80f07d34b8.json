@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "02873085-4bf5-436c-8570-ff80f07d34b8",
+  "path": "clerk-setup",
+  "path_key": "clerk-setup",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "clerk/skills/clerk-setup",
+    "subpath": "skills/core/clerk-setup",
+    "branch": null
+  }
+}

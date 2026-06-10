@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f53b0bf1-0fc9-4ebd-b0bd-6389bef21a2d",
+  "path": "clerk-orgs",
+  "path_key": "clerk-orgs",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "clerk/skills/clerk-orgs",
+    "subpath": "skills/features/clerk-orgs",
+    "branch": null
+  }
+}
