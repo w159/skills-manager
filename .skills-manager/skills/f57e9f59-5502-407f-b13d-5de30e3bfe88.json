@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f57e9f59-5502-407f-b13d-5de30e3bfe88",
+  "path": "typescript-review",
+  "path_key": "typescript-review",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

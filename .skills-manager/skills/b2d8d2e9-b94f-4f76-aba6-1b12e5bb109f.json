@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b2d8d2e9-b94f-4f76-aba6-1b12e5bb109f",
+  "path": "secret-scanning",
+  "path_key": "secret-scanning",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

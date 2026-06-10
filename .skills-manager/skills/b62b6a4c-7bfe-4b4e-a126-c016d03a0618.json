@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b62b6a4c-7bfe-4b4e-a126-c016d03a0618",
+  "path": "data-breach-blast-radius",
+  "path_key": "data-breach-blast-radius",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

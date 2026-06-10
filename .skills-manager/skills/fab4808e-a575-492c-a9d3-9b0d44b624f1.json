@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "fab4808e-a575-492c-a9d3-9b0d44b624f1",
+  "path": "security-review",
+  "path_key": "security-review",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

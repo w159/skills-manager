@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "35637274-9067-46fe-9734-c89769560551",
+  "path": "codebase-brain",
+  "path_key": "codebase-brain",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

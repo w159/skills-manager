@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f5185eb8-d630-403b-b417-74ccc4151bf9",
+  "path": "mcp-security-audit",
+  "path_key": "mcp-security-audit",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

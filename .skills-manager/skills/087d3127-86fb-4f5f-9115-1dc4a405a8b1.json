@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "087d3127-86fb-4f5f-9115-1dc4a405a8b1",
+  "path": "entra-agent-user",
+  "path_key": "entra-agent-user",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

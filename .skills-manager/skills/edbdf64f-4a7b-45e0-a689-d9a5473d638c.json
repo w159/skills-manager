@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "edbdf64f-4a7b-45e0-a689-d9a5473d638c",
+  "path": "uv-package-manager",
+  "path_key": "uv-package-manager",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "99d5d85c-6501-4875-b141-8dbc326f9b8f",
+  "path": "pytest-coverage",
+  "path_key": "pytest-coverage",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

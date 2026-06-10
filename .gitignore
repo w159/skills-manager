@@ -37,3 +37,6 @@ reference
 CLAUDE.md
 .loop-log
 
+Thumbs.db
+*.tmp
+.skills-manager.lock

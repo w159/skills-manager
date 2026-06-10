@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "110c5a41-fd78-4204-8a9a-fbf04d7e8830",
+  "path": "source-command-sync-agent-assets",
+  "path_key": "source-command-sync-agent-assets",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

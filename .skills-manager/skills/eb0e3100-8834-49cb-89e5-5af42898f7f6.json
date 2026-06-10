@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "eb0e3100-8834-49cb-89e5-5af42898f7f6",
+  "path": "postgresql-optimization",
+  "path_key": "postgresql-optimization",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

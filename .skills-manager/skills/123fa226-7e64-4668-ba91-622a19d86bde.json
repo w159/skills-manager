@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "123fa226-7e64-4668-ba91-622a19d86bde",
+  "path": "azure-deployment-preflight",
+  "path_key": "azure-deployment-preflight",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

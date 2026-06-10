@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e216bdaa-cb14-4377-bfe0-f3a12be1560d",
+  "path": "source-command-validate-agent-assets",
+  "path_key": "source-command-validate-agent-assets",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "78802e66-3fb0-4dad-83b5-5e1145cd54fc",
+  "path": "scrapling-official",
+  "path_key": "scrapling-official",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

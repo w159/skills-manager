@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d197b072-5f22-41b5-a9a8-4c504bf58b01",
+  "path": "az-cost-optimize",
+  "path_key": "az-cost-optimize",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

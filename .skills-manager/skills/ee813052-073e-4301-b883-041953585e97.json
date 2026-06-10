@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ee813052-073e-4301-b883-041953585e97",
+  "path": "gdpr-compliant",
+  "path_key": "gdpr-compliant",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

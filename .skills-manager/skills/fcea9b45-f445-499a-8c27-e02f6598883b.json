@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "fcea9b45-f445-499a-8c27-e02f6598883b",
+  "path": "msgraph-sdk",
+  "path_key": "msgraph-sdk",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

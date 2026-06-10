@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a62ec5a8-0f15-4f4f-a8bf-e3ff76f100f1",
+  "path": "cloud-design-patterns",
+  "path_key": "cloud-design-patterns",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

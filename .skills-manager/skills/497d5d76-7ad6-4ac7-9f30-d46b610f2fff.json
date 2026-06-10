@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "497d5d76-7ad6-4ac7-9f30-d46b610f2fff",
+  "path": "source-command-audit-agent-assets",
+  "path_key": "source-command-audit-agent-assets",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

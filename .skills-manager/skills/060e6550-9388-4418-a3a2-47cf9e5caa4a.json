@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "060e6550-9388-4418-a3a2-47cf9e5caa4a",
+  "path": "orchestrate",
+  "path_key": "orchestrate",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
