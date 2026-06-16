@@ -893,5 +893,9 @@
         "diverged": "冲突"
       }
     }
+  },
+  "library": {
+    "emptyTitle": "未找到{{type}}",
+    "emptyHint": "此类型尚无管理的资产。"
   }
 }

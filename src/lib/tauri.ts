@@ -51,6 +51,73 @@ export interface SkillTarget {
   synced_at: number | null;
 }
 
+// ── Assets ──
+
+export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule";
+
+/** Mirrors ManagedAssetDto from src-tauri/src/commands/assets.rs */
+export interface ManagedAsset {
+  id: string;
+  name: string;
+  description: string | null;
+  asset_type: string;
+  central_path: string;
+  enabled: boolean;
+  status: string;
+}
+
+/** Backward-compatible alias so callers that expect ManagedSkill still type-check. */
+export type ManagedSkillAlias = ManagedAsset;
+
+/** Per-adapter delivery result returned by deliver_managed_asset. */
+export interface AdapterDeliveryResult {
+  adapter_key: string;
+  outcome: string;
+  path: string | null;
+}
+
+/** One discoverable asset in the source workspace (mirrors ImportCandidate). */
+export interface ImportCandidate {
+  asset_type: string;
+  id_or_name: string;
+  source_path: string;
+  in_active_set: boolean;
+  display_name: string | null;
+  description: string | null;
+  tools: string[] | null;
+  codex_sandbox_mode: string | null;
+  codex_reasoning_effort: string | null;
+}
+
+export interface ListCandidatesResult {
+  candidates: ImportCandidate[];
+}
+
+/** Result of importing one asset. */
+export interface ImportResult {
+  asset_type: string;
+  id_or_name: string;
+  central_path: string;
+}
+
+export interface ImportAssetsResult {
+  imported: ImportResult[];
+  errors: string[];
+}
+
+/** The SelectedAsset payload expected by import_selected_assets. */
+export interface SelectedAsset {
+  asset_type: string;
+  id_or_name: string;
+  source_path: string;
+  in_active_set: boolean;
+  display_name: string | null;
+  description: string | null;
+  tools: string[] | null;
+  codex_sandbox_mode: string | null;
+  codex_reasoning_effort: string | null;
+}
+
 export interface SkillToolToggle {
   tool: string;
   display_name: string;
@@ -661,3 +728,17 @@ export const updateGlobalLocalSkillFromCenter = (agent: string, skillRelativePat
 
 export const deleteGlobalLocalSkill = (agent: string, skillRelativePath: string) =>
   invoke<void>("delete_global_local_skill", { agent, skillRelativePath });
+
+// ── Multi-asset commands ──
+
+export const getManagedAssets = (assetType: AssetType) =>
+  invoke<ManagedAsset[]>("get_managed_assets", { assetTypeStr: assetType });
+
+export const deliverManagedAsset = (assetId: string) =>
+  invoke<AdapterDeliveryResult[]>("deliver_managed_asset", { assetId });
+
+export const listImportCandidates = (workspacePath: string) =>
+  invoke<ListCandidatesResult>("list_import_candidates", { workspacePath });
+
+export const importSelectedAssets = (selected: SelectedAsset[]) =>
+  invoke<ImportAssetsResult>("import_selected_assets", { selected });

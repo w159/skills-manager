@@ -164,15 +164,15 @@ export function Sidebar() {
   };
 
   const NAV_ITEMS = [
-    { name: t("sidebar.dashboard"), path: "/", icon: LayoutDashboard },
-    { name: t("sidebar.mySkills"), path: "/my-skills", icon: Layers },
-    { name: t("sidebar.installSkills"), path: "/install", icon: Download },
+    { name: t("sidebar.dashboard"), path: "/", icon: LayoutDashboard, activePrefix: null as string | null },
+    { name: t("sidebar.mySkills"), path: "/library/skill", icon: Layers, activePrefix: "/library" },
+    { name: t("sidebar.installSkills"), path: "/install", icon: Download, activePrefix: null as string | null },
   ];
 
   const handleSwitchPreset = (id: string) => {
     setViewedPresetId(id);
-    if (location.pathname !== "/my-skills") {
-      navigate("/my-skills");
+    if (!location.pathname.startsWith("/library")) {
+      navigate("/library/skill");
     }
   };
 
@@ -180,7 +180,7 @@ export function Sidebar() {
     await api.createPreset(name, description, icon);
     await Promise.all([refreshPresets(), refreshManagedSkills()]);
     if (location.pathname === "/settings") {
-      navigate("/my-skills");
+      navigate("/library/skill");
     }
     toast.success(t("preset.created"));
   };
@@ -204,7 +204,7 @@ export function Sidebar() {
     await api.deletePreset(deleteTarget.id);
     await Promise.all([refreshPresets(), refreshManagedSkills()]);
     if (location.pathname === "/settings") {
-      navigate("/my-skills");
+      navigate("/library/skill");
     }
     toast.success(t("preset.deleted"));
   };
@@ -393,7 +393,9 @@ export function Sidebar() {
         <div className="px-2.5 space-y-0.5 shrink-0">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = item.activePrefix
+              ? location.pathname.startsWith(item.activePrefix)
+              : location.pathname === item.path;
             return (
               <Link
                 key={item.path}

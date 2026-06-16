@@ -809,5 +809,9 @@
         "diverged": "衝突"
       }
     }
+  },
+  "library": {
+    "emptyTitle": "未找到{{type}}",
+    "emptyHint": "此類型尚無管理的資產。"
   }
 }

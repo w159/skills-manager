@@ -893,5 +893,9 @@
         "diverged": "Conflict"
       }
     }
+  },
+  "library": {
+    "emptyTitle": "No {{type}}s found",
+    "emptyHint": "Nothing of this type is managed yet."
   }
 }
