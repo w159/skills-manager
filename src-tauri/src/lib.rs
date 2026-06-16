@@ -1009,6 +1009,9 @@ pub fn run() {
             // Importer
             commands::importer::list_import_candidates,
             commands::importer::import_selected_assets,
+            // Assets (multi-asset-type query + delivery)
+            commands::assets::get_managed_assets,
+            commands::assets::deliver_managed_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

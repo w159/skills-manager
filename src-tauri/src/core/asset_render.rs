@@ -5,6 +5,7 @@
 /// Output fidelity is validated against the reference Python implementation
 /// in `agentic-tools/scripts/agent_assets.py` (`_render_codex_agent`,
 /// `_render_copilot_agent`, `_frontmatter`, `_body`, `_title`).
+use anyhow::{bail, Result};
 
 /// Parsed representation of a canonical agent source file.
 ///
@@ -25,6 +26,90 @@ pub struct CanonicalAgent {
     pub codex_sandbox_mode: Option<String>,
     /// The raw markdown body (everything after the frontmatter block).
     pub body: String,
+}
+
+// ── Builder: parse an imported agent .md into CanonicalAgent ──────────────
+
+/// Parse an imported agent markdown file into a `CanonicalAgent`.
+///
+/// The file format is:
+/// ```text
+/// ---
+/// name: backend-architect
+/// display_name: Backend Architect        # optional
+/// description: One sentence purpose.
+/// tools:
+///   - Read
+///   - Grep
+/// codex_reasoning_effort: high           # optional
+/// codex_sandbox_mode: workspace-write    # optional
+/// ---
+/// Body markdown here.
+/// ```
+///
+/// `name` is used as the `id`.  Any field absent in the frontmatter falls
+/// back to the same defaults the render functions use at render time.
+pub fn canonical_agent_from_file(path: &std::path::Path) -> Result<CanonicalAgent> {
+    let content = std::fs::read_to_string(path)?;
+    let trimmed = content.trim();
+
+    if !trimmed.starts_with("---") {
+        bail!(
+            "canonical_agent_from_file: {} has no YAML frontmatter (must start with '---')",
+            path.display()
+        );
+    }
+
+    // Split off the opening "---", then find the closing "\n---"
+    let rest = &trimmed[3..]; // skip leading "---"
+    let end = rest
+        .find("\n---")
+        .ok_or_else(|| anyhow::anyhow!("canonical_agent_from_file: no closing '---' in {}", path.display()))?;
+
+    let yaml_str = &rest[..end];
+    let body = rest[end + 4..].to_string(); // skip "\n---"
+
+    let yaml: serde_yaml::Value = serde_yaml::from_str(yaml_str).map_err(|e| {
+        anyhow::anyhow!(
+            "canonical_agent_from_file: YAML parse error in {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    let get_str = |key: &str| -> Option<String> {
+        yaml.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    };
+
+    // `name` is the machine id (e.g. "backend-architect").
+    let id = get_str("name").ok_or_else(|| {
+        anyhow::anyhow!(
+            "canonical_agent_from_file: missing 'name' field in {}",
+            path.display()
+        )
+    })?;
+
+    let description = get_str("description").unwrap_or_default();
+
+    let tools: Vec<String> = yaml
+        .get("tools")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(CanonicalAgent {
+        id,
+        display_name: get_str("display_name"),
+        description,
+        tools,
+        codex_reasoning_effort: get_str("codex_reasoning_effort"),
+        codex_sandbox_mode: get_str("codex_sandbox_mode"),
+        body,
+    })
 }
 
 // ── Internal helpers (mirrors Python helpers exactly) ──────────────────────
@@ -351,5 +436,88 @@ mod tests {
         let agent = fixture_agent();
         assert_eq!(render_codex(&agent), render_codex(&agent));
         assert_eq!(render_copilot(&agent), render_copilot(&agent));
+    }
+
+    // ── canonical_agent_from_file ───────────────────────────────────────────
+
+    fn write_agent_md(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
+        let path = dir.join(format!("{}.md", name));
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn canonical_agent_from_file_parses_all_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_agent_md(
+            tmp.path(),
+            "backend-architect",
+            "---\nname: backend-architect\ndisplay_name: Backend Architect\ndescription: Design scalable systems.\ntools:\n  - Read\n  - Grep\ncodex_reasoning_effort: high\ncodex_sandbox_mode: workspace-write\n---\nBody content here.\n",
+        );
+        let agent = canonical_agent_from_file(&path).unwrap();
+        assert_eq!(agent.id, "backend-architect");
+        assert_eq!(agent.display_name.as_deref(), Some("Backend Architect"));
+        assert_eq!(agent.description, "Design scalable systems.");
+        assert_eq!(agent.tools, vec!["Read", "Grep"]);
+        assert_eq!(agent.codex_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(agent.codex_sandbox_mode.as_deref(), Some("workspace-write"));
+        assert!(agent.body.contains("Body content here."));
+    }
+
+    #[test]
+    fn canonical_agent_from_file_codex_reasoning_effort_high() {
+        // Spec unit: frontmatter with codex_reasoning_effort="high" -> field = Some("high")
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_agent_md(
+            tmp.path(),
+            "test-agent",
+            "---\nname: test-agent\ndescription: A test agent.\ncodex_reasoning_effort: high\n---\nBody.\n",
+        );
+        let agent = canonical_agent_from_file(&path).unwrap();
+        assert_eq!(
+            agent.codex_reasoning_effort.as_deref(),
+            Some("high"),
+            "codex_reasoning_effort must be Some(\"high\")"
+        );
+    }
+
+    #[test]
+    fn canonical_agent_from_file_optional_fields_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_agent_md(
+            tmp.path(),
+            "minimal",
+            "---\nname: minimal\ndescription: Minimal agent.\n---\nBody.\n",
+        );
+        let agent = canonical_agent_from_file(&path).unwrap();
+        assert_eq!(agent.id, "minimal");
+        assert!(agent.display_name.is_none());
+        assert!(agent.tools.is_empty());
+        assert!(agent.codex_reasoning_effort.is_none());
+        assert!(agent.codex_sandbox_mode.is_none());
+    }
+
+    #[test]
+    fn canonical_agent_from_file_missing_name_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_agent_md(
+            tmp.path(),
+            "noname",
+            "---\ndescription: No name field.\n---\nBody.\n",
+        );
+        assert!(
+            canonical_agent_from_file(&path).is_err(),
+            "missing 'name' must return Err"
+        );
+    }
+
+    #[test]
+    fn canonical_agent_from_file_no_frontmatter_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_agent_md(tmp.path(), "plain", "No frontmatter here.\n");
+        assert!(
+            canonical_agent_from_file(&path).is_err(),
+            "file without frontmatter must return Err"
+        );
     }
 }

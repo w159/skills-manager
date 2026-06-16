@@ -318,6 +318,23 @@ impl SkillStore {
         Ok(rows.next().and_then(|r| r.ok()))
     }
 
+    /// Return all skill records whose `asset_type` column matches `asset_type`.
+    ///
+    /// Skill listing (`get_all_skills`) is not changed; this is an additive
+    /// query used by the new `get_managed_assets` command.
+    pub fn get_skills_by_asset_type(&self, asset_type: AssetType) -> Result<Vec<SkillRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
+                    source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
+                    created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                    asset_type
+             FROM skills WHERE asset_type = ?1 ORDER BY name",
+        )?;
+        let rows = stmt.query_map(params![asset_type.as_str()], map_skill_row)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     pub fn update_skill_source_metadata(
         &self,
         id: &str,

@@ -1,4 +1,5 @@
 pub mod agent_workspace;
+pub mod assets;
 pub mod browse;
 pub mod git_backup;
 pub mod importer;
