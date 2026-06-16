@@ -321,6 +321,7 @@ mod tests {
             update_status: "local_only".to_string(),
             last_checked_at: None,
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         }
     }
 

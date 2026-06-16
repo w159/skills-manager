@@ -275,6 +275,7 @@ fn reconcile_skills_index_unlocked(store: &SkillStore) -> anyhow::Result<()> {
             update_status: "local_only".to_string(),
             last_checked_at: Some(now),
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         };
 
         store.insert_skill(&record)?;

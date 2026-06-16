@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// Current schema version. Bump this when adding a new migration.
-const LATEST_VERSION: u32 = 6;
+const LATEST_VERSION: u32 = 7;
 
 /// Run all pending migrations on the database.
 ///
@@ -53,6 +53,7 @@ fn migrate_step(conn: &Connection, from_version: u32) -> Result<()> {
         3 => migrate_v3_to_v4(conn),
         4 => migrate_v4_to_v5(conn),
         5 => migrate_v5_to_v6(conn),
+        6 => migrate_v6_to_v7(conn),
         _ => bail!("unknown migration version: {from_version}"),
     }
 }
@@ -275,6 +276,14 @@ fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v6 → v7: Add `asset_type` to `skills`. Introduces the canonical asset-type
+/// dimension. Existing rows default to 'skill' via the column DEFAULT so no
+/// explicit backfill is needed.
+fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "skills", "asset_type", "TEXT NOT NULL DEFAULT 'skill'")?;
+    Ok(())
+}
+
 // ── Helpers ──
 
 fn add_column_if_missing(
@@ -493,6 +502,103 @@ mod tests {
         assert!(
             msg.contains("newer than this app supports"),
             "unexpected error: {msg}"
+        );
+    }
+
+    // ── v7 migration tests ──
+
+    #[test]
+    fn test_fresh_database_has_asset_type_column() {
+        // A brand-new DB should migrate all the way to v7 and expose asset_type.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, LATEST_VERSION);
+        assert!(
+            has_column(&conn, "skills", "asset_type").unwrap(),
+            "skills.asset_type column missing after fresh migration"
+        );
+    }
+
+    #[test]
+    fn test_v6_database_upgrades_to_v7_preserves_asset_type_default() {
+        // Simulate a database that is already at v6 (no asset_type column).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        // Build the v6 schema manually and stamp it at version 6.
+        conn.execute_batch(
+            "
+            CREATE TABLE skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                source_type TEXT NOT NULL,
+                source_ref TEXT,
+                source_ref_resolved TEXT,
+                source_subpath TEXT,
+                source_branch TEXT,
+                source_revision TEXT,
+                remote_revision TEXT,
+                central_path TEXT NOT NULL UNIQUE,
+                content_hash TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at INTEGER,
+                updated_at INTEGER,
+                status TEXT DEFAULT 'ok',
+                update_status TEXT DEFAULT 'unknown',
+                last_checked_at INTEGER,
+                last_check_error TEXT
+            );
+            CREATE TABLE skill_targets (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                tool TEXT NOT NULL,
+                target_path TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                status TEXT DEFAULT 'ok',
+                synced_at INTEGER,
+                last_error TEXT,
+                source_hash TEXT,
+                UNIQUE(skill_id, tool)
+            );
+            INSERT INTO skills (id, name, source_type, central_path, enabled, created_at, updated_at)
+                VALUES ('s1', 'existing-skill', 'import', '/tmp/s1', 1, 0, 0);
+            PRAGMA user_version = 6;
+            ",
+        )
+        .unwrap();
+
+        // Run the pending migration (v6 -> v7).
+        run_migrations(&conn).unwrap();
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, LATEST_VERSION);
+
+        // Column must exist.
+        assert!(
+            has_column(&conn, "skills", "asset_type").unwrap(),
+            "skills.asset_type column missing after v6->v7 migration"
+        );
+
+        // Existing row must have defaulted to 'skill'.
+        let asset_type: String = conn
+            .query_row(
+                "SELECT asset_type FROM skills WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            asset_type, "skill",
+            "existing row asset_type should default to 'skill', got {asset_type:?}"
         );
     }
 }

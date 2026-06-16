@@ -10,6 +10,47 @@ use super::crypto;
 /// Settings keys whose values are encrypted at rest with AES-256-GCM.
 const SENSITIVE_KEYS: &[&str] = &["proxy_url", "git_backup_remote_url"];
 
+/// The canonical set of asset types the app can manage.
+///
+/// String-backed: each variant round-trips through its lowercase name
+/// (e.g. `AssetType::Agent` <-> `"agent"`). Unknown strings default to
+/// `AssetType::Skill` so old rows and future unknown values never panic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AssetType {
+    Skill,
+    Agent,
+    Command,
+    Hook,
+    Script,
+    Rule,
+}
+
+impl AssetType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AssetType::Skill => "skill",
+            AssetType::Agent => "agent",
+            AssetType::Command => "command",
+            AssetType::Hook => "hook",
+            AssetType::Script => "script",
+            AssetType::Rule => "rule",
+        }
+    }
+
+    /// Parse a string slice into an `AssetType`. Unknown values map to
+    /// `AssetType::Skill` (safe default — no panic).
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "agent" => AssetType::Agent,
+            "command" => AssetType::Command,
+            "hook" => AssetType::Hook,
+            "script" => AssetType::Script,
+            "rule" => AssetType::Rule,
+            _ => AssetType::Skill,
+        }
+    }
+}
+
 pub struct SkillStore {
     conn: Mutex<Connection>,
     secret_key: [u8; 32],
@@ -36,6 +77,9 @@ pub struct SkillRecord {
     pub update_status: String,
     pub last_checked_at: Option<i64>,
     pub last_check_error: Option<String>,
+    /// Asset type dimension. Defaults to `AssetType::Skill` for all existing
+    /// rows and any caller that does not supply an explicit value.
+    pub asset_type: AssetType,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,9 +176,10 @@ impl SkillStore {
             "INSERT INTO skills (
                 id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                 source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                asset_type
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 skill.id,
                 skill.name,
@@ -155,6 +200,7 @@ impl SkillStore {
                 skill.update_status,
                 skill.last_checked_at,
                 skill.last_check_error,
+                skill.asset_type.as_str(),
             ],
         )?;
         Ok(())
@@ -166,9 +212,10 @@ impl SkillStore {
             "INSERT INTO skills (
                 id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                 source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                asset_type
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -186,7 +233,8 @@ impl SkillStore {
                 status = excluded.status,
                 update_status = excluded.update_status,
                 last_checked_at = excluded.last_checked_at,
-                last_check_error = excluded.last_check_error",
+                last_check_error = excluded.last_check_error,
+                asset_type = excluded.asset_type",
             params![
                 skill.id,
                 skill.name,
@@ -207,6 +255,7 @@ impl SkillStore {
                 skill.update_status,
                 skill.last_checked_at,
                 skill.last_check_error,
+                skill.asset_type.as_str(),
             ],
         )?;
         Ok(())
@@ -217,7 +266,8 @@ impl SkillStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                     source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                    created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                    created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                    asset_type
              FROM skills ORDER BY name",
         )?;
         let rows = stmt.query_map([], map_skill_row)?;
@@ -229,7 +279,8 @@ impl SkillStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                     source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                    created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                    created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                    asset_type
              FROM skills WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_skill_row)?;
@@ -241,7 +292,8 @@ impl SkillStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                     source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                    created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                    created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                    asset_type
              FROM skills WHERE central_path = ?1",
         )?;
         let mut rows = stmt.query_map(params![central_path], map_skill_row)?;
@@ -257,7 +309,8 @@ impl SkillStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
                     source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
-                    created_at, updated_at, status, update_status, last_checked_at, last_check_error
+                    created_at, updated_at, status, update_status, last_checked_at, last_check_error,
+                    asset_type
              FROM skills
              WHERE source_type = ?1 AND source_ref = ?2",
         )?;
@@ -811,7 +864,8 @@ impl SkillStore {
         let mut stmt = conn.prepare(
             "SELECT s.id, s.name, s.description, s.source_type, s.source_ref, s.source_ref_resolved, s.source_subpath,
                     s.source_branch, s.source_revision, s.remote_revision, s.central_path, s.content_hash, s.enabled,
-                    s.created_at, s.updated_at, s.status, s.update_status, s.last_checked_at, s.last_check_error
+                    s.created_at, s.updated_at, s.status, s.update_status, s.last_checked_at, s.last_check_error,
+                    s.asset_type
              FROM skills s
              INNER JOIN scenario_skills ss ON s.id = ss.skill_id
              WHERE ss.scenario_id = ?1
@@ -1347,6 +1401,7 @@ mod scenario_membership_tests {
             update_status: "local_only".to_string(),
             last_checked_at: None,
             last_check_error: None,
+            asset_type: AssetType::Skill,
         }
     }
 
@@ -1403,6 +1458,11 @@ mod scenario_membership_tests {
 }
 
 fn map_skill_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SkillRecord> {
+    // Index 19 is asset_type — may be NULL on rows written before v7 migration,
+    // in which case we default to AssetType::Skill.
+    let asset_type_str: Option<String> = row.get(19)?;
+    let asset_type = AssetType::from_str(asset_type_str.as_deref().unwrap_or("skill"));
+
     Ok(SkillRecord {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -1423,5 +1483,6 @@ fn map_skill_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SkillRecord> {
         update_status: row.get(16)?,
         last_checked_at: row.get(17)?,
         last_check_error: row.get(18)?,
+        asset_type,
     })
 }

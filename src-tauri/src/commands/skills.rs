@@ -1718,6 +1718,7 @@ pub fn store_installed_skill_unlocked(
         update_status: metadata.update_status.clone(),
         last_checked_at: Some(now),
         last_check_error: None,
+        asset_type: crate::core::skill_store::AssetType::Skill,
     };
 
     store.insert_skill(&record).map_err(AppError::db)?;
@@ -2311,6 +2312,7 @@ mod tests {
             update_status: "local_only".to_string(),
             last_checked_at: None,
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         }
     }
 

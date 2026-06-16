@@ -305,6 +305,7 @@ fn import_agent_local_skill_to_center(
         update_status: "local_only".to_string(),
         last_checked_at: Some(now),
         last_check_error: None,
+        asset_type: crate::core::skill_store::AssetType::Skill,
     };
 
     store.insert_skill(&skill_record).map_err(AppError::db)?;
@@ -629,6 +630,7 @@ mod tests {
             update_status: "local_only".to_string(),
             last_checked_at: Some(0),
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         };
 
         let mut tags_map = HashMap::new();
@@ -684,6 +686,7 @@ mod tests {
                 update_status: "local_only".to_string(),
                 last_checked_at: Some(now),
                 last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Skill,
             })
             .unwrap();
 
@@ -768,6 +771,7 @@ mod tests {
                 update_status: "local_only".to_string(),
                 last_checked_at: Some(now),
                 last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Skill,
             })
             .unwrap();
 
@@ -847,6 +851,7 @@ mod tests {
                 update_status: "local_only".to_string(),
                 last_checked_at: Some(now),
                 last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Skill,
             })
             .unwrap();
 
@@ -947,6 +952,7 @@ mod tests {
                 update_status: "local_only".to_string(),
                 last_checked_at: Some(0),
                 last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Skill,
             })
             .unwrap();
 

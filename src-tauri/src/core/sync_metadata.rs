@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 use super::central_repo;
 use super::repo_lock::RepoLock;
 use super::skill_metadata;
-use super::skill_store::{ScenarioRecord, SkillRecord, SkillStore};
+use super::skill_store::{AssetType, ScenarioRecord, SkillRecord, SkillStore};
 
 const SCHEMA_VERSION: u32 = 1;
 const APP_MIN_VERSION: &str = "2.0.0";
@@ -194,6 +194,9 @@ pub(crate) fn reindex_from_metadata_unlocked(store: &SkillStore) -> Result<()> {
                 .unwrap_or_else(|| "unknown".to_string()),
             last_checked_at: previous.and_then(|s| s.last_checked_at),
             last_check_error: previous.and_then(|s| s.last_check_error.clone()),
+            asset_type: previous
+                .map(|s| s.asset_type)
+                .unwrap_or(AssetType::Skill),
         };
         store.upsert_skill(&record)?;
         store.set_tags_for_skill(&meta.skill_id, &meta.tags)?;
@@ -675,6 +678,7 @@ mod tests {
             update_status: "local_only".to_string(),
             last_checked_at: None,
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         }
     }
 

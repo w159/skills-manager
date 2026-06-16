@@ -128,6 +128,7 @@ pub async fn import_existing_skill(
                 update_status: "local_only".to_string(),
                 last_checked_at: Some(now),
                 last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Skill,
             };
 
             store.insert_skill(&record)?;
@@ -188,6 +189,7 @@ pub async fn import_all_discovered(store: State<'_, Arc<SkillStore>>) -> Result<
                             update_status: "local_only".to_string(),
                             last_checked_at: Some(now),
                             last_check_error: None,
+                            asset_type: crate::core::skill_store::AssetType::Skill,
                         };
                         store.insert_skill(&record)?;
                         changed = true;
@@ -240,6 +242,7 @@ mod tests {
             update_status: "local_only".to_string(),
             last_checked_at: None,
             last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Skill,
         }
     }
 
