@@ -2,6 +2,40 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::core::skill_store::AssetType;
+use crate::core::sync_engine::SyncMode;
+
+// ---------------------------------------------------------------------------
+// Asset capability types
+// ---------------------------------------------------------------------------
+
+/// Which renderer to invoke when `mode` is `SyncMode::Render`.
+/// Carried in `AssetCapability` so the orchestration stage can select the
+/// correct render function without knowing the adapter identity at that point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renderer {
+    Codex,
+    Copilot,
+}
+
+/// How a single `(adapter, AssetType)` pair is delivered.
+///
+/// - `target_subdir`: path segment appended to the adapter's home dir
+///   (e.g. `"agents"` -> `~/.claude/agents/`).
+/// - `mode`: the `SyncMode` the delivery engine should use.
+/// - `filename_rule`: `None` for directory-per-asset types (Skill, Hook,
+///   Script, Rule with Place mode); `Some(template)` for file-per-asset
+///   types where `{id}` and `{name}` are interpolated by the caller.
+/// - `renderer`: populated only when `mode == SyncMode::Render`; identifies
+///   which render function to call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetCapability {
+    pub target_subdir: &'static str,
+    pub mode: SyncMode,
+    pub filename_rule: Option<&'static str>,
+    pub renderer: Option<Renderer>,
+}
+
 /// Top-level grouping for sidebar/overview display. Does not affect skill
 /// deployment, sync, or any other backend behavior — purely a UI taxonomy.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +175,138 @@ impl ToolAdapter {
     /// Whether this adapter's skills_dir has been overridden from the default.
     pub fn has_path_override(&self) -> bool {
         self.override_skills_dir.is_some()
+    }
+
+    /// Returns how this adapter delivers the given `AssetType`, or `None` when
+    /// the type is unsupported by this adapter.
+    ///
+    /// `AssetType::Skill` always returns `None` here — callers must continue
+    /// using the existing `skills_dir()` + engine sync-mode path so that Skill
+    /// delivery behavior is not altered.
+    pub fn asset_capability(&self, asset_type: AssetType) -> Option<AssetCapability> {
+        // Skill delivery is intentionally excluded: the existing engine path
+        // (skills_dir + sync_mode_for_tool) owns that behavior.
+        if asset_type == AssetType::Skill {
+            return None;
+        }
+
+        match self.key.as_str() {
+            // ------------------------------------------------------------------
+            // Claude Code  (~/.claude)
+            // ------------------------------------------------------------------
+            "claude_code" => match asset_type {
+                AssetType::Agent => Some(AssetCapability {
+                    target_subdir: "agents",
+                    mode: SyncMode::Symlink,
+                    filename_rule: Some("{id}.md"),
+                    renderer: None,
+                }),
+                AssetType::Command => Some(AssetCapability {
+                    target_subdir: "commands",
+                    mode: SyncMode::Symlink,
+                    filename_rule: Some("{name}.md"),
+                    renderer: None,
+                }),
+                AssetType::Hook => Some(AssetCapability {
+                    target_subdir: "hooks",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Script => Some(AssetCapability {
+                    target_subdir: "scripts",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Rule => Some(AssetCapability {
+                    target_subdir: "rules",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Skill => unreachable!("guarded above"),
+            },
+
+            // ------------------------------------------------------------------
+            // Pi  (~/.pi/agent)
+            // ------------------------------------------------------------------
+            "pi" => match asset_type {
+                AssetType::Agent => Some(AssetCapability {
+                    target_subdir: "agents",
+                    mode: SyncMode::Symlink,
+                    filename_rule: Some("{id}.md"),
+                    renderer: None,
+                }),
+                AssetType::Command => Some(AssetCapability {
+                    target_subdir: "commands",
+                    mode: SyncMode::Symlink,
+                    filename_rule: Some("{name}.md"),
+                    renderer: None,
+                }),
+                AssetType::Hook => Some(AssetCapability {
+                    target_subdir: "hooks",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Script => Some(AssetCapability {
+                    target_subdir: "scripts",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Rule => Some(AssetCapability {
+                    target_subdir: "rules",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
+                AssetType::Skill => unreachable!("guarded above"),
+            },
+
+            // ------------------------------------------------------------------
+            // Codex  (~/.codex)
+            // ------------------------------------------------------------------
+            "codex" => match asset_type {
+                AssetType::Agent => Some(AssetCapability {
+                    target_subdir: "agents",
+                    mode: SyncMode::Render,
+                    filename_rule: Some("{id}.toml"),
+                    renderer: Some(Renderer::Codex),
+                }),
+                AssetType::Command => Some(AssetCapability {
+                    target_subdir: "commands",
+                    mode: SyncMode::Symlink,
+                    filename_rule: Some("{name}.md"),
+                    renderer: None,
+                }),
+                // Hook, Script, Rule: unsupported for Codex
+                AssetType::Hook | AssetType::Script | AssetType::Rule => None,
+                AssetType::Skill => unreachable!("guarded above"),
+            },
+
+            // ------------------------------------------------------------------
+            // GitHub Copilot  (~/.copilot)
+            // ------------------------------------------------------------------
+            "github_copilot" => match asset_type {
+                AssetType::Agent => Some(AssetCapability {
+                    target_subdir: "agents",
+                    mode: SyncMode::Render,
+                    filename_rule: Some("{id}.agent.md"),
+                    renderer: Some(Renderer::Copilot),
+                }),
+                // Command, Hook, Script, Rule: unsupported for Copilot
+                AssetType::Command
+                | AssetType::Hook
+                | AssetType::Script
+                | AssetType::Rule => None,
+                AssetType::Skill => unreachable!("guarded above"),
+            },
+
+            // Every other adapter: no capability for non-Skill types.
+            _ => None,
+        }
     }
 }
 
@@ -890,7 +1056,9 @@ pub fn enabled_installed_adapters(
 
 #[cfg(test)]
 mod tests {
-    use super::default_tool_adapters;
+    use super::{default_tool_adapters, AssetCapability, Renderer};
+    use crate::core::skill_store::AssetType;
+    use crate::core::sync_engine::SyncMode;
 
     #[test]
     fn antigravity_uses_current_default_skills_path() {
@@ -923,5 +1091,200 @@ mod tests {
         assert_eq!(adapter.relative_skills_dir, ".config/opencode/skills");
         // Project path under workspace: .opencode/skills
         assert_eq!(adapter.project_relative_skills_dir(), ".opencode/skills");
+    }
+
+    // -----------------------------------------------------------------------
+    // asset_capability matrix
+    // -----------------------------------------------------------------------
+
+    fn find(key: &str) -> super::ToolAdapter {
+        default_tool_adapters()
+            .into_iter()
+            .find(|a| a.key == key)
+            .unwrap_or_else(|| panic!("adapter '{}' not found", key))
+    }
+
+    #[test]
+    fn asset_capability_skill_always_returns_none_for_all_four_core_agents() {
+        // Skill delivery must not be changed; asset_capability must return None
+        // for Skill on every adapter so callers keep using the existing path.
+        for key in &["claude_code", "pi", "codex", "github_copilot"] {
+            assert!(
+                find(key).asset_capability(AssetType::Skill).is_none(),
+                "Skill capability must be None for '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn asset_capability_matrix_claude_code() {
+        let a = find("claude_code");
+
+        assert_eq!(
+            a.asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{id}.md"),
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Command),
+            Some(AssetCapability {
+                target_subdir: "commands",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{name}.md"),
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Hook),
+            Some(AssetCapability {
+                target_subdir: "hooks",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Script),
+            Some(AssetCapability {
+                target_subdir: "scripts",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Rule),
+            Some(AssetCapability {
+                target_subdir: "rules",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+    }
+
+    #[test]
+    fn asset_capability_matrix_pi() {
+        let a = find("pi");
+
+        assert_eq!(
+            a.asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{id}.md"),
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Command),
+            Some(AssetCapability {
+                target_subdir: "commands",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{name}.md"),
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Hook),
+            Some(AssetCapability {
+                target_subdir: "hooks",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Script),
+            Some(AssetCapability {
+                target_subdir: "scripts",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Rule),
+            Some(AssetCapability {
+                target_subdir: "rules",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
+    }
+
+    #[test]
+    fn asset_capability_matrix_codex() {
+        let a = find("codex");
+
+        assert_eq!(
+            a.asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Render,
+                filename_rule: Some("{id}.toml"),
+                renderer: Some(Renderer::Codex),
+            })
+        );
+        assert_eq!(
+            a.asset_capability(AssetType::Command),
+            Some(AssetCapability {
+                target_subdir: "commands",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{name}.md"),
+                renderer: None,
+            })
+        );
+        assert!(a.asset_capability(AssetType::Hook).is_none());
+        assert!(a.asset_capability(AssetType::Script).is_none());
+        assert!(a.asset_capability(AssetType::Rule).is_none());
+    }
+
+    #[test]
+    fn asset_capability_matrix_github_copilot() {
+        let a = find("github_copilot");
+
+        assert_eq!(
+            a.asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Render,
+                filename_rule: Some("{id}.agent.md"),
+                renderer: Some(Renderer::Copilot),
+            })
+        );
+        assert!(a.asset_capability(AssetType::Command).is_none());
+        assert!(a.asset_capability(AssetType::Hook).is_none());
+        assert!(a.asset_capability(AssetType::Script).is_none());
+        assert!(a.asset_capability(AssetType::Rule).is_none());
+    }
+
+    #[test]
+    fn asset_capability_non_core_adapter_returns_none_for_all_new_types_and_still_has_skill_none()
+    {
+        // Spot-check a non-core adapter (cursor) to confirm it falls into the
+        // wildcard arm and returns None for every new type.
+        let a = find("cursor");
+        for t in [
+            AssetType::Agent,
+            AssetType::Command,
+            AssetType::Hook,
+            AssetType::Script,
+            AssetType::Rule,
+        ] {
+            assert!(
+                a.asset_capability(t).is_none(),
+                "cursor should return None for {:?}",
+                t
+            );
+        }
+        // Skill is also None (existing path unchanged).
+        assert!(a.asset_capability(AssetType::Skill).is_none());
     }
 }

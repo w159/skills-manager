@@ -6,6 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 
+use super::skill_store::AssetType;
+
 const CONFIG_FILE_NAME: &str = "repo-config.json";
 
 static BASE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -147,6 +149,22 @@ pub fn skills_dir() -> PathBuf {
         return path;
     }
     base_dir().join("skills")
+}
+
+/// Resolve the subdirectory under the central repo root that holds assets of
+/// `asset_type`.  `AssetType::Skill` delegates to [`skills_dir`] so it
+/// respects the runtime override and is byte-identical to what every existing
+/// caller receives.  All other types map to lowercase-plural names alongside
+/// the skills directory.
+pub fn asset_type_dir(asset_type: AssetType) -> PathBuf {
+    match asset_type {
+        AssetType::Skill => skills_dir(),
+        AssetType::Agent => base_dir().join("agents"),
+        AssetType::Command => base_dir().join("commands"),
+        AssetType::Hook => base_dir().join("hooks"),
+        AssetType::Script => base_dir().join("scripts"),
+        AssetType::Rule => base_dir().join("rules"),
+    }
 }
 
 /// Derive a stable per-skills-root state directory under the user's default base.
@@ -360,7 +378,17 @@ pub fn ensure_central_repo() -> Result<()> {
     let current_base = base_dir();
     migrate_repo_if_needed(&mut config, &current_base)?;
 
-    let dirs = [skills_dir(), scenarios_dir(), cache_dir(), logs_dir()];
+    let dirs = [
+        skills_dir(),
+        scenarios_dir(),
+        cache_dir(),
+        logs_dir(),
+        asset_type_dir(AssetType::Agent),
+        asset_type_dir(AssetType::Command),
+        asset_type_dir(AssetType::Hook),
+        asset_type_dir(AssetType::Script),
+        asset_type_dir(AssetType::Rule),
+    ];
     for d in &dirs {
         fs::create_dir_all(d)?;
     }
@@ -460,5 +488,89 @@ mod tests {
             PathBuf::from("a/b")
         );
         assert_eq!(lexically_normalize(Path::new("/..")), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn asset_type_dir_maps_each_type_to_expected_subdir() {
+        let _guard = test_base_dir_lock();
+        let tmp = std::env::temp_dir().join("skills-manager-asset-type-dir-test");
+        set_test_base_dir_override(Some(tmp.clone()));
+
+        assert_eq!(
+            asset_type_dir(AssetType::Skill),
+            tmp.join("skills"),
+            "Skill must map to the skills subdir"
+        );
+        assert_eq!(asset_type_dir(AssetType::Agent), tmp.join("agents"));
+        assert_eq!(asset_type_dir(AssetType::Command), tmp.join("commands"));
+        assert_eq!(asset_type_dir(AssetType::Hook), tmp.join("hooks"));
+        assert_eq!(asset_type_dir(AssetType::Script), tmp.join("scripts"));
+        assert_eq!(asset_type_dir(AssetType::Rule), tmp.join("rules"));
+
+        set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn asset_type_dir_skill_is_byte_identical_to_skills_dir() {
+        let _guard = test_base_dir_lock();
+        let tmp = std::env::temp_dir().join("skills-manager-skill-identity-test");
+        set_test_base_dir_override(Some(tmp.clone()));
+
+        assert_eq!(
+            asset_type_dir(AssetType::Skill),
+            skills_dir(),
+            "AssetType::Skill must return exactly what skills_dir() returns"
+        );
+
+        set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn asset_type_dir_skill_respects_skills_dir_override() {
+        let _guard = test_base_dir_lock();
+        let tmp_base = std::env::temp_dir().join("skills-manager-override-test-base");
+        let tmp_override = std::env::temp_dir().join("skills-manager-override-test-skills");
+        set_test_base_dir_override(Some(tmp_base));
+        set_runtime_skills_dir_override(Some(tmp_override.clone()));
+
+        assert_eq!(
+            asset_type_dir(AssetType::Skill),
+            tmp_override,
+            "AssetType::Skill must honour the SKILLS_DIR_OVERRIDE just as skills_dir() does"
+        );
+
+        set_runtime_skills_dir_override(None);
+        set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn ensure_central_repo_creates_per_type_subdirs() {
+        let _guard = test_base_dir_lock();
+        let tmp = std::env::temp_dir().join("skills-manager-ensure-repo-test");
+        // clean slate
+        let _ = std::fs::remove_dir_all(&tmp);
+        set_test_base_dir_override(Some(tmp.clone()));
+
+        ensure_central_repo().expect("ensure_central_repo should succeed");
+
+        for (name, path) in [
+            ("agents", tmp.join("agents")),
+            ("commands", tmp.join("commands")),
+            ("hooks", tmp.join("hooks")),
+            ("scripts", tmp.join("scripts")),
+            ("rules", tmp.join("rules")),
+        ] {
+            assert!(
+                path.is_dir(),
+                "expected {name} subdir to exist at {}",
+                path.display()
+            );
+        }
+
+        // skills dir also exists (pre-existing behaviour)
+        assert!(tmp.join("skills").is_dir(), "skills dir must still be created");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        set_test_base_dir_override(None);
     }
 }
