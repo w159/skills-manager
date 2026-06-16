@@ -9,6 +9,7 @@ pub mod error;
 pub mod file_watcher;
 pub mod git_backup;
 pub mod git_fetcher;
+pub mod importer;
 pub mod install_cancel;
 pub mod installer;
 pub mod log_sanitize;

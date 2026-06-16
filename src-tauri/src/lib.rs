@@ -1006,6 +1006,9 @@ pub fn run() {
             commands::projects::reorder_projects,
             commands::presets::get_preset_skill_order,
             commands::presets::reorder_preset_skills,
+            // Importer
+            commands::importer::list_import_candidates,
+            commands::importer::import_selected_assets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
