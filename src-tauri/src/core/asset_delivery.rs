@@ -17,6 +17,80 @@ use crate::core::sync_engine::{sync_skill, write_rendered_file, SyncMode};
 use crate::core::tool_adapters::ToolAdapter;
 
 // ---------------------------------------------------------------------------
+// Backup helpers
+// ---------------------------------------------------------------------------
+
+/// If `target` exists and is NOT already the managed artifact we are about to
+/// create, rename it to `<target>.backup-<timestamp>` (format `%Y%m%d-%H%M%S`,
+/// consistent with `git_backup.rs`) and return the backup path.
+///
+/// "Already ours" means:
+/// - Symlink/Place: the target is a symlink that resolves to `source`.
+/// - Render: the target is a regular file whose content equals `render_bytes`.
+///
+/// If the target does not exist, or is already ours, returns `None` (no backup
+/// created).  This is the idempotency guarantee: re-delivering an unchanged
+/// asset never churns backups.
+fn backup_foreign_target(
+    target: &Path,
+    source: &Path,
+    mode: SyncMode,
+    render_bytes: Option<&[u8]>,
+) -> Result<Option<PathBuf>> {
+    // Does the target exist at all (follow through: check lstat)?
+    if std::fs::symlink_metadata(target).is_err() {
+        // Nothing there; nothing to back up.
+        return Ok(None);
+    }
+
+    // Is this already our managed artifact?
+    let already_ours = match mode {
+        SyncMode::Symlink | SyncMode::Place => symlink_points_to_source(target, source),
+        SyncMode::Render => {
+            if let Some(bytes) = render_bytes {
+                match std::fs::read(target) {
+                    Ok(existing) => existing == bytes,
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        }
+        SyncMode::Copy => false,
+    };
+
+    if already_ours {
+        return Ok(None);
+    }
+
+    // Foreign artifact: rename it to a timestamped backup.
+    let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let backup = PathBuf::from(format!("{}.backup-{}", target.display(), ts));
+    std::fs::rename(target, &backup).map_err(|e| {
+        anyhow::anyhow!(
+            "backup_foreign_target: failed to rename {:?} -> {:?}: {}",
+            target,
+            backup,
+            e
+        )
+    })?;
+    Ok(Some(backup))
+}
+
+/// Return true when `target` is a symlink that resolves to the same inode as
+/// `source` (cross-platform: falls back to false when symlinks are unsupported).
+fn symlink_points_to_source(target: &Path, source: &Path) -> bool {
+    // Only meaningful on platforms with symlink support.
+    if !target.is_symlink() {
+        return false;
+    }
+    match (std::fs::canonicalize(target), std::fs::canonicalize(source)) {
+        (Ok(t), Ok(s)) => t == s,
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public result type
 // ---------------------------------------------------------------------------
 
@@ -117,6 +191,8 @@ pub fn deliver_asset(
         // ── Symlink ──────────────────────────────────────────────────────────
         SyncMode::Symlink => {
             std::fs::create_dir_all(&subdir)?;
+            // Back up any pre-existing foreign file before symlinking.
+            backup_foreign_target(&target, asset.source, SyncMode::Symlink, None)?;
             sync_skill(asset.source, &target, SyncMode::Symlink)?;
             Ok(DeliveryOutcome::Symlinked(target))
         }
@@ -138,6 +214,9 @@ pub fn deliver_asset(
                 ),
             };
             std::fs::create_dir_all(&subdir)?;
+            // Back up any pre-existing foreign file before writing.  Pass the
+            // render bytes so the check can recognise our own prior output.
+            backup_foreign_target(&target, asset.source, SyncMode::Render, Some(&bytes))?;
             let (written, _hash) = write_rendered_file(&target, &bytes)?;
             if written {
                 Ok(DeliveryOutcome::Rendered(target))
@@ -149,6 +228,8 @@ pub fn deliver_asset(
         // ── Place ─────────────────────────────────────────────────────────────
         SyncMode::Place => {
             std::fs::create_dir_all(&subdir)?;
+            // Back up any pre-existing foreign file/directory before placing.
+            backup_foreign_target(&target, asset.source, SyncMode::Place, None)?;
             sync_skill(asset.source, &target, SyncMode::Place)?;
             Ok(DeliveryOutcome::Placed(target))
         }
@@ -495,6 +576,157 @@ mod tests {
             matches!(r2, DeliveryOutcome::RenderedUpToDate(_)),
             "second identical render should be RenderedUpToDate, got {:?}",
             r2
+        );
+    }
+
+    // ── BACKUP / COEXISTENCE ─────────────────────────────────────────────────
+
+    /// Takeover (symlink): a pre-existing real file at the target path is
+    /// backed up before the managed symlink is created.
+    #[cfg(unix)]
+    #[test]
+    fn takeover_symlink_backs_up_preexisting_file() {
+        let home = tempdir().unwrap();
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("backend-architect.md");
+        fs::write(&src, b"# Backend Architect").unwrap();
+
+        // Pre-create a real (non-managed) file at the target location.
+        let agents_dir = home.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        let target = agents_dir.join("backend-architect.md");
+        fs::write(&target, b"PREEXISTING").unwrap();
+
+        let agent = sample_agent();
+        let a = adapter("claude_code", home.path());
+        let input = AssetInput {
+            asset_type: AssetType::Agent,
+            source: &src,
+            id: "backend-architect",
+            name: "backend-architect",
+            canonical_agent: Some(&agent),
+        };
+        let result = deliver_asset(&a, home.path(), &input).unwrap();
+
+        // (a) The delivery succeeded and the managed symlink is in place.
+        assert!(
+            matches!(result, DeliveryOutcome::Symlinked(_)),
+            "expected Symlinked, got {:?}",
+            result
+        );
+        assert!(target.is_symlink(), "target must now be a managed symlink");
+        assert_eq!(
+            fs::canonicalize(&target).unwrap(),
+            fs::canonicalize(&src).unwrap(),
+            "symlink must resolve to source"
+        );
+
+        // (b) A backup file exists containing the original "PREEXISTING" content.
+        let backup = fs::read_dir(&agents_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("backend-architect.md.backup-")
+            })
+            .expect("a .backup-<ts> file must exist after takeover");
+        let backup_content = fs::read(&backup.path()).unwrap();
+        assert_eq!(
+            backup_content, b"PREEXISTING",
+            "backup must contain the original file content"
+        );
+    }
+
+    /// Idempotency (symlink): delivering the same symlink asset twice to a
+    /// clean home must not create any backup file on either call.
+    #[cfg(unix)]
+    #[test]
+    fn idempotent_symlink_delivery_creates_no_backup() {
+        let home = tempdir().unwrap();
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("backend-architect.md");
+        fs::write(&src, b"# Backend Architect").unwrap();
+
+        let agent = sample_agent();
+        let a = adapter("claude_code", home.path());
+        let mk_input = || AssetInput {
+            asset_type: AssetType::Agent,
+            source: &src,
+            id: "backend-architect",
+            name: "backend-architect",
+            canonical_agent: Some(&agent),
+        };
+
+        // First delivery.
+        let r1 = deliver_asset(&a, home.path(), &mk_input()).unwrap();
+        assert!(matches!(r1, DeliveryOutcome::Symlinked(_)));
+
+        // Second delivery of the identical asset.
+        let r2 = deliver_asset(&a, home.path(), &mk_input()).unwrap();
+        assert!(matches!(r2, DeliveryOutcome::Symlinked(_)));
+
+        // No backup file must exist in the agents dir.
+        let agents_dir = home.path().join("agents");
+        let has_backup = fs::read_dir(&agents_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".backup-"));
+        assert!(
+            !has_backup,
+            "re-delivering an unchanged symlink asset must not create a backup"
+        );
+    }
+
+    /// Takeover (render): a pre-existing non-managed file at the Codex .toml
+    /// path is backed up before the rendered file is written.
+    #[cfg(unix)]
+    #[test]
+    fn takeover_render_backs_up_preexisting_file() {
+        let home = tempdir().unwrap();
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("backend-architect.md");
+        fs::write(&src, b"placeholder").unwrap();
+
+        // Pre-create a non-managed file where the rendered .toml will land.
+        let agents_dir = home.path().join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        let target = agents_dir.join("backend-architect.toml");
+        fs::write(&target, b"PREEXISTING_TOML").unwrap();
+
+        let agent = sample_agent();
+        let a = adapter("codex", home.path());
+        let input = AssetInput {
+            asset_type: AssetType::Agent,
+            source: &src,
+            id: "backend-architect",
+            name: "backend-architect",
+            canonical_agent: Some(&agent),
+        };
+        let result = deliver_asset(&a, home.path(), &input).unwrap();
+
+        // Managed rendered file is now in place.
+        assert!(
+            matches!(result, DeliveryOutcome::Rendered(_)),
+            "expected Rendered, got {:?}",
+            result
+        );
+        assert!(target.is_file(), "rendered .toml must exist");
+
+        // A backup containing the original bytes must exist.
+        let backup = fs::read_dir(&agents_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("backend-architect.toml.backup-")
+            })
+            .expect("a .backup-<ts> file must exist after render takeover");
+        let backup_content = fs::read(&backup.path()).unwrap();
+        assert_eq!(
+            backup_content, b"PREEXISTING_TOML",
+            "backup must contain the original file content"
         );
     }
 }
