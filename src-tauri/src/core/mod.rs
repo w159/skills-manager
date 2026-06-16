@@ -1,3 +1,4 @@
+pub mod asset_delivery;
 pub mod asset_render;
 pub mod app_state;
 pub mod audit_log;

@@ -309,6 +309,46 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Rendered-file write path
+// ---------------------------------------------------------------------------
+
+/// Write `bytes` to `target`, skipping the write when the target already
+/// contains the same content (hash-gated freshness).
+///
+/// Returns `true` when the file was written and `false` when it was already
+/// current (so callers can record a hash without re-writing every run).
+///
+/// The hash of `bytes` is computed with SHA-256 and compared against the
+/// hash of the existing file on disk.  If both match the file is left
+/// untouched.  The caller is responsible for persisting the hash string
+/// (hex-encoded SHA-256) returned in the `Ok` tuple so it can be passed
+/// back on the next call as `last_hash` — mirroring how `is_target_current`
+/// works for Render mode.
+pub fn write_rendered_file(target: &Path, bytes: &[u8]) -> Result<(bool, String)> {
+    use sha2::{Digest, Sha256};
+
+    let new_hash = hex::encode(Sha256::digest(bytes));
+
+    // Check if the existing target has identical content.
+    if target.is_file() {
+        let existing = std::fs::read(target).unwrap_or_default();
+        let existing_hash = hex::encode(Sha256::digest(&existing));
+        if existing_hash == new_hash {
+            return Ok((false, new_hash));
+        }
+    }
+
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create parent dirs for {:?}", target))?;
+    }
+    std::fs::write(target, bytes)
+        .with_context(|| format!("Failed to write rendered file {:?}", target))?;
+
+    Ok((true, new_hash))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
