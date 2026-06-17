@@ -11,6 +11,7 @@ import {
   BookOpen,
   GitBranch,
   Puzzle,
+  Blocks,
   Globe,
   Download,
   Settings,
@@ -89,8 +90,9 @@ export function Sidebar() {
     { type: "hook",      label: t("sidebar.hooks"),      icon: Anchor     },
     { type: "script",    label: t("sidebar.scripts"),    icon: FileCode2  },
     { type: "rule",      label: t("sidebar.rules"),      icon: BookOpen   },
-    { type: "workflow",  label: t("sidebar.workflows"),  icon: GitBranch  },
-    { type: "plugin",    label: t("sidebar.plugins"),    icon: Puzzle     },
+    { type: "workflow",   label: t("sidebar.workflows"),   icon: GitBranch },
+    { type: "plugin",     label: t("sidebar.plugins"),     icon: Puzzle    },
+    { type: "extension",  label: t("sidebar.extensions"),  icon: Blocks    },
   ] as const;
 
   const globalSkillsByAgent = useMemo(() => {

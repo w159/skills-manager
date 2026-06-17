@@ -165,6 +165,7 @@ pub fn asset_type_dir(asset_type: AssetType) -> PathBuf {
         AssetType::Script => base_dir().join("scripts"),
         AssetType::Rule => base_dir().join("rules"),
         AssetType::Workflow => base_dir().join("workflows"),
+        AssetType::Extension => base_dir().join("extensions"),
     }
 }
 
@@ -390,6 +391,7 @@ pub fn ensure_central_repo() -> Result<()> {
         asset_type_dir(AssetType::Script),
         asset_type_dir(AssetType::Rule),
         asset_type_dir(AssetType::Workflow),
+        asset_type_dir(AssetType::Extension),
     ];
     for d in &dirs {
         fs::create_dir_all(d)?;
@@ -509,6 +511,7 @@ mod tests {
         assert_eq!(asset_type_dir(AssetType::Script), tmp.join("scripts"));
         assert_eq!(asset_type_dir(AssetType::Rule), tmp.join("rules"));
         assert_eq!(asset_type_dir(AssetType::Workflow), tmp.join("workflows"));
+        assert_eq!(asset_type_dir(AssetType::Extension), tmp.join("extensions"));
 
         set_test_base_dir_override(None);
     }
@@ -563,6 +566,7 @@ mod tests {
             ("scripts", tmp.join("scripts")),
             ("rules", tmp.join("rules")),
             ("workflows", tmp.join("workflows")),
+            ("extensions", tmp.join("extensions")),
         ] {
             assert!(
                 path.is_dir(),
@@ -585,6 +589,17 @@ mod tests {
         set_test_base_dir_override(Some(tmp.clone()));
 
         assert_eq!(asset_type_dir(AssetType::Workflow), tmp.join("workflows"));
+
+        set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn asset_type_dir_extension_maps_to_extensions_subdir() {
+        let _guard = test_base_dir_lock();
+        let tmp = std::env::temp_dir().join("skills-manager-extension-dir-test");
+        set_test_base_dir_override(Some(tmp.clone()));
+
+        assert_eq!(asset_type_dir(AssetType::Extension), tmp.join("extensions"));
 
         set_test_base_dir_override(None);
     }

@@ -231,6 +231,8 @@ impl ToolAdapter {
                     filename_rule: None,
                     renderer: None,
                 }),
+                // Extension: no delivery target yet (shell only)
+                AssetType::Extension => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -274,6 +276,8 @@ impl ToolAdapter {
                     filename_rule: None,
                     renderer: None,
                 }),
+                // Extension: no delivery target yet (shell only)
+                AssetType::Extension => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -293,8 +297,8 @@ impl ToolAdapter {
                     filename_rule: Some("{name}.md"),
                     renderer: None,
                 }),
-                // Hook, Script, Rule, Workflow: unsupported for Codex
-                AssetType::Hook | AssetType::Script | AssetType::Rule | AssetType::Workflow => None,
+                // Hook, Script, Rule, Workflow, Extension: unsupported for Codex
+                AssetType::Hook | AssetType::Script | AssetType::Rule | AssetType::Workflow | AssetType::Extension => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -308,12 +312,13 @@ impl ToolAdapter {
                     filename_rule: Some("{id}.agent.md"),
                     renderer: Some(Renderer::Copilot),
                 }),
-                // Command, Hook, Script, Rule, Workflow: unsupported for Copilot
+                // Command, Hook, Script, Rule, Workflow, Extension: unsupported for Copilot
                 AssetType::Command
                 | AssetType::Hook
                 | AssetType::Script
                 | AssetType::Rule
-                | AssetType::Workflow => None,
+                | AssetType::Workflow
+                | AssetType::Extension => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -1188,6 +1193,7 @@ mod tests {
                 renderer: None,
             })
         );
+        assert!(a.asset_capability(AssetType::Extension).is_none());
     }
 
     #[test]
@@ -1248,6 +1254,7 @@ mod tests {
                 renderer: None,
             })
         );
+        assert!(a.asset_capability(AssetType::Extension).is_none());
     }
 
     #[test]
@@ -1276,6 +1283,7 @@ mod tests {
         assert!(a.asset_capability(AssetType::Script).is_none());
         assert!(a.asset_capability(AssetType::Rule).is_none());
         assert!(a.asset_capability(AssetType::Workflow).is_none());
+        assert!(a.asset_capability(AssetType::Extension).is_none());
     }
 
     #[test]
@@ -1296,6 +1304,7 @@ mod tests {
         assert!(a.asset_capability(AssetType::Script).is_none());
         assert!(a.asset_capability(AssetType::Rule).is_none());
         assert!(a.asset_capability(AssetType::Workflow).is_none());
+        assert!(a.asset_capability(AssetType::Extension).is_none());
     }
 
     #[test]
@@ -1311,6 +1320,7 @@ mod tests {
             AssetType::Script,
             AssetType::Rule,
             AssetType::Workflow,
+            AssetType::Extension,
         ] {
             assert!(
                 a.asset_capability(t).is_none(),
@@ -1356,5 +1366,16 @@ mod tests {
             find("github_copilot").asset_capability(AssetType::Workflow).is_none(),
             "github_copilot must return None for Workflow"
         );
+    }
+
+    #[test]
+    fn asset_capability_extension_is_none_for_all_adapters() {
+        // Extension is a shell only — no adapter delivers it yet.
+        for key in ["claude_code", "pi", "codex", "github_copilot", "cursor"] {
+            assert!(
+                find(key).asset_capability(AssetType::Extension).is_none(),
+                "{key} must return None for Extension (shell only)"
+            );
+        }
     }
 }

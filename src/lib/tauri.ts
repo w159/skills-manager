@@ -53,7 +53,7 @@ export interface SkillTarget {
 
 // ── Assets ──
 
-export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule" | "workflow" | "plugin";
+export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule" | "workflow" | "plugin" | "extension";
 
 // ── Plugins ──
 

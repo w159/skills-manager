@@ -14,6 +14,7 @@
     "rules": "Rules",
     "workflows": "Workflows",
     "plugins": "Plugins",
+    "extensions": "Extensions",
     "globalWorkspace": "Global Workspace",
     "lobsterAgents": "Lobster Agents",
     "installSkills": "Install Skills",

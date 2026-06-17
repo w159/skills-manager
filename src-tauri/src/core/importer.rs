@@ -892,6 +892,15 @@ mod tests {
         assert_eq!(AssetType::Workflow.as_str(), "workflow");
     }
 
+    // ── Extension-specific tests ───────────────────────────────────────────────
+
+    #[test]
+    fn extension_round_trip_from_str_and_as_str() {
+        use crate::core::skill_store::AssetType;
+        assert_eq!(AssetType::from_str("extension"), AssetType::Extension);
+        assert_eq!(AssetType::Extension.as_str(), "extension");
+    }
+
     /// workflows/ scan yields "onboard" but not the .toml artifact.
     #[test]
     fn list_candidates_discovers_workflow_and_filters_toml_artifact() {

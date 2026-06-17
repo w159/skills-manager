@@ -24,6 +24,7 @@ pub enum AssetType {
     Script,
     Rule,
     Workflow,
+    Extension,
 }
 
 impl AssetType {
@@ -36,6 +37,7 @@ impl AssetType {
             AssetType::Script => "script",
             AssetType::Rule => "rule",
             AssetType::Workflow => "workflow",
+            AssetType::Extension => "extension",
         }
     }
 
@@ -49,6 +51,7 @@ impl AssetType {
             "script" => AssetType::Script,
             "rule" => AssetType::Rule,
             "workflow" => AssetType::Workflow,
+            "extension" => AssetType::Extension,
             _ => AssetType::Skill,
         }
     }

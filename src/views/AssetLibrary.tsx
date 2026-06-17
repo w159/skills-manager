@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import {
-  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen, GitBranch, Puzzle,
+  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen, GitBranch, Puzzle, Blocks,
   Loader2, AlertCircle, RefreshCw, Trash2, FolderOpen, X,
 } from "lucide-react";
 import { cn } from "../utils";
@@ -31,7 +31,8 @@ const TABS: TabDef[] = [
   { type: "script",   label: "Scripts",   icon: FileCode2  },
   { type: "rule",     label: "Rules",     icon: BookOpen   },
   { type: "workflow", label: "Workflows", icon: GitBranch  },
-  { type: "plugin",   label: "Plugins",   icon: Puzzle     },
+  { type: "plugin",    label: "Plugins",    icon: Puzzle     },
+  { type: "extension", label: "Extensions", icon: Blocks     },
 ];
 
 const VALID_TYPES = new Set<string>(TABS.map((t) => t.type));
