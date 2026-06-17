@@ -298,7 +298,11 @@ impl ToolAdapter {
                     renderer: None,
                 }),
                 // Hook, Script, Rule, Workflow, Extension: unsupported for Codex
-                AssetType::Hook | AssetType::Script | AssetType::Rule | AssetType::Workflow | AssetType::Extension => None,
+                AssetType::Hook
+                | AssetType::Script
+                | AssetType::Rule
+                | AssetType::Workflow
+                | AssetType::Extension => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -1308,8 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_capability_non_core_adapter_returns_none_for_all_new_types_and_still_has_skill_none()
-    {
+    fn asset_capability_non_core_adapter_returns_none_for_all_new_types_and_still_has_skill_none() {
         // Spot-check a non-core adapter (cursor) to confirm it falls into the
         // wildcard arm and returns None for every new type.
         let a = find("cursor");
@@ -1358,12 +1361,16 @@ mod tests {
         );
         // Codex: unsupported
         assert!(
-            find("codex").asset_capability(AssetType::Workflow).is_none(),
+            find("codex")
+                .asset_capability(AssetType::Workflow)
+                .is_none(),
             "codex must return None for Workflow"
         );
         // GitHub Copilot: unsupported
         assert!(
-            find("github_copilot").asset_capability(AssetType::Workflow).is_none(),
+            find("github_copilot")
+                .asset_capability(AssetType::Workflow)
+                .is_none(),
             "github_copilot must return None for Workflow"
         );
     }
@@ -1377,5 +1384,56 @@ mod tests {
                 "{key} must return None for Extension (shell only)"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Agent delivery contract — regression anchor for the symlink scheme
+    // -----------------------------------------------------------------------
+    //
+    // Each tool's Agent row must match the user's manual deployment scheme
+    // exactly.  If any of these assertions fail the capability table has
+    // drifted from the expected contract and must be investigated before
+    // shipping.
+    //
+    //   Claude Code : Symlink  {id}.md       renderer = None
+    //   Codex       : Render   {id}.toml     renderer = Codex
+    //   Copilot     : Render   {id}.agent.md renderer = Copilot
+    #[test]
+    fn agent_delivery_capability_matches_manual_symlink_scheme() {
+        // Claude Code: symlink the canonical .md file unchanged
+        assert_eq!(
+            find("claude_code").asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Symlink,
+                filename_rule: Some("{id}.md"),
+                renderer: None,
+            }),
+            "claude_code Agent must use Symlink to {{id}}.md with no renderer"
+        );
+
+        // Codex: render the agent into .toml format via the Codex renderer
+        assert_eq!(
+            find("codex").asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Render,
+                filename_rule: Some("{id}.toml"),
+                renderer: Some(Renderer::Codex),
+            }),
+            "codex Agent must use Render to {{id}}.toml with Renderer::Codex"
+        );
+
+        // GitHub Copilot: render the agent into .agent.md format via the Copilot renderer
+        assert_eq!(
+            find("github_copilot").asset_capability(AssetType::Agent),
+            Some(AssetCapability {
+                target_subdir: "agents",
+                mode: SyncMode::Render,
+                filename_rule: Some("{id}.agent.md"),
+                renderer: Some(Renderer::Copilot),
+            }),
+            "github_copilot Agent must use Render to {{id}}.agent.md with Renderer::Copilot"
+        );
     }
 }

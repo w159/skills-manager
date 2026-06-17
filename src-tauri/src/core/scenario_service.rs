@@ -4,10 +4,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::{
+    asset_delivery::{deliver_asset, AssetInput},
+    asset_render::canonical_agent_from_file,
     error::AppError,
-    skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
-    sync_engine, tool_adapters,
-    tool_service,
+    skill_store::{AssetType, ScenarioRecord, SkillStore, SkillTargetRecord},
+    sync_engine, tool_adapters, tool_service,
 };
 
 #[derive(Debug, Clone)]
@@ -82,7 +83,8 @@ pub fn collect_scenario_sync_targets(
     for skill in &skills {
         let source = PathBuf::from(&skill.central_path);
         let target_name = sync_engine::target_dir_name(&source, &skill.name);
-        let adapters = enabled_installed_adapters_for_scenario_skill(store, scenario_id, &skill.id)?;
+        let adapters =
+            enabled_installed_adapters_for_scenario_skill(store, scenario_id, &skill.id)?;
         for adapter in &adapters {
             let target = adapter.skills_dir().join(&target_name);
             let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
@@ -134,7 +136,10 @@ pub fn preview_scenario_sync(
 /// The reverse direction (existing `"symlink"`, desired `Copy`) returns
 /// `None` because the user actively changed the `sync_mode` setting and
 /// the on-disk symlink doesn't reflect that intent.
-fn skip_check_mode(existing_mode: &str, desired: sync_engine::SyncMode) -> Option<sync_engine::SyncMode> {
+fn skip_check_mode(
+    existing_mode: &str,
+    desired: sync_engine::SyncMode,
+) -> Option<sync_engine::SyncMode> {
     match (existing_mode, desired) {
         ("symlink", sync_engine::SyncMode::Symlink) => Some(sync_engine::SyncMode::Symlink),
         ("copy", sync_engine::SyncMode::Copy) => Some(sync_engine::SyncMode::Copy),
@@ -347,7 +352,9 @@ pub fn apply_scenario_to_default(store: &SkillStore, scenario_id: &str) -> Resul
         }
     }
 
-    store.set_active_scenario(scenario_id).map_err(AppError::db)?;
+    store
+        .set_active_scenario(scenario_id)
+        .map_err(AppError::db)?;
     sync_desired_targets(store, &desired_targets)
 }
 
@@ -358,7 +365,8 @@ pub fn sync_skill_to_active_scenario(
 ) -> Result<(), AppError> {
     if let Ok(Some(active_id)) = store.get_active_scenario_id() {
         if active_id == scenario_id {
-            let adapters = enabled_installed_adapters_for_scenario_skill(store, scenario_id, skill_id)?;
+            let adapters =
+                enabled_installed_adapters_for_scenario_skill(store, scenario_id, skill_id)?;
             let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
             let Ok(Some(skill)) = store.get_skill_by_id(skill_id) else {
                 return Ok(());
@@ -378,7 +386,8 @@ pub fn sync_skill_to_active_scenario(
                 }
 
                 let target = adapter.skills_dir().join(&target_name);
-                let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
+                let mode =
+                    sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
                 match sync_engine::sync_skill(&source, &target, mode) {
                     Ok(actual_mode) => {
                         let now = chrono::Utc::now().timestamp_millis();
@@ -423,7 +432,9 @@ pub fn ensure_default_startup_scenario(store: &SkillStore) -> Result<(), AppErro
             created_at: now,
             updated_at: now,
         };
-        store.insert_scenario(&default_scenario).map_err(AppError::db)?;
+        store
+            .insert_scenario(&default_scenario)
+            .map_err(AppError::db)?;
         scenarios.push(default_scenario);
     }
 
@@ -464,7 +475,9 @@ pub fn ensure_cli_scenario_state(store: &SkillStore) -> Result<(), AppError> {
             created_at: now,
             updated_at: now,
         };
-        store.insert_scenario(&default_scenario).map_err(AppError::db)?;
+        store
+            .insert_scenario(&default_scenario)
+            .map_err(AppError::db)?;
         scenarios.push(default_scenario);
     }
 
@@ -505,7 +518,8 @@ pub fn sync_active_scenario_to_tool(store: &SkillStore, tool_key: &str) {
             return;
         };
         for skill_id in skill_ids {
-            if let Ok(adapters) = enabled_installed_adapters_for_scenario_skill(store, &active_id, &skill_id)
+            if let Ok(adapters) =
+                enabled_installed_adapters_for_scenario_skill(store, &active_id, &skill_id)
             {
                 if adapters.iter().any(|adapter| adapter.key == tool_key) {
                     let _ = sync_skill_to_active_scenario(store, &active_id, &skill_id);
@@ -543,6 +557,86 @@ pub fn sync_single_skill_to_tool(
         .ok_or_else(|| AppError::not_found("Skill not found"))?;
 
     let source = PathBuf::from(&skill.central_path);
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Branch on asset_type: agents are delivered by the generic capability
+    // engine (symlink for Claude/Pi, rendered file for Codex/Copilot).
+    // Every other type (Skill and any future additions) continues on the
+    // existing sync_engine path so its behavior is byte-for-byte unchanged.
+    if skill.asset_type == AssetType::Agent {
+        let canonical_agent = canonical_agent_from_file(&source).map_err(AppError::io)?;
+
+        // home is the adapter root (e.g. ~/.claude); skills_dir is one level
+        // deeper (e.g. ~/.claude/skills).  deliver_asset uses home, not
+        // skills_dir, to resolve capability-specific subdirs.
+        let home = adapter
+            .skills_dir()
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| adapter.skills_dir());
+
+        let input = AssetInput {
+            asset_type: AssetType::Agent,
+            source: &source,
+            id: &skill.name,
+            name: &skill.name,
+            canonical_agent: Some(&canonical_agent),
+        };
+
+        let outcome = deliver_asset(&adapter, &home, &input).map_err(AppError::io)?;
+
+        // Map the real DeliveryOutcome to (target_path, mode_str) so the
+        // skill_targets row reflects what actually landed on disk.
+        //
+        // Mirroring deliver_managed_asset (commands/assets.rs ~607-625):
+        //   - Symlinked / Rendered / RenderedUpToDate / Placed: extract the
+        //     concrete path and the mode string from the outcome variant.
+        //   - ForeignHome / Unsupported / DeferToSkillPath: nothing was
+        //     written; do NOT record a successful target row.  Return early
+        //     instead so a refused or no-op delivery is never logged as "ok".
+        use crate::core::asset_delivery::DeliveryOutcome;
+        let (target_path, mode_str) = match &outcome {
+            // Defect 1 fix: derive mode from the actual outcome, not a
+            // hardcoded "symlink".  Symlinked -> "symlink", Rendered /
+            // RenderedUpToDate -> "render" (matches the skill branch's
+            // `actual_mode.as_str()` pattern), Placed -> "place".
+            DeliveryOutcome::Symlinked(p) => {
+                (p.to_string_lossy().to_string(), "symlink".to_string())
+            }
+            DeliveryOutcome::Rendered(p) | DeliveryOutcome::RenderedUpToDate(p) => {
+                (p.to_string_lossy().to_string(), "render".to_string())
+            }
+            DeliveryOutcome::Placed(p) => (p.to_string_lossy().to_string(), "place".to_string()),
+            // Defect 2 fix: refused / unsupported deliveries produce no
+            // on-disk artifact; recording them as status "ok" / mode
+            // "symlink" would be a false positive.  Return early without
+            // inserting any skill_targets row, matching the no-insert path
+            // in deliver_managed_asset (commands/assets.rs ~620-625).
+            DeliveryOutcome::ForeignHome(_)
+            | DeliveryOutcome::Unsupported
+            | DeliveryOutcome::DeferToSkillPath => {
+                return Ok(());
+            }
+        };
+
+        let target_record = SkillTargetRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            skill_id: skill_id.to_string(),
+            tool: tool.to_string(),
+            target_path,
+            mode: mode_str,
+            status: "ok".to_string(),
+            synced_at: Some(now),
+            last_error: None,
+            source_hash: skill.content_hash.clone(),
+        };
+
+        store.insert_target(&target_record).map_err(AppError::db)?;
+        return Ok(());
+    }
+
+    // Skill (and any unhandled asset types): existing sync_engine path,
+    // preserved byte-for-byte.
     let target = adapter
         .skills_dir()
         .join(sync_engine::target_dir_name(&source, &skill.name));
@@ -550,7 +644,6 @@ pub fn sync_single_skill_to_tool(
     let mode = sync_engine::sync_mode_for_tool(tool, configured_mode.as_deref());
     let actual_mode = sync_engine::sync_skill(&source, &target, mode).map_err(AppError::io)?;
 
-    let now = chrono::Utc::now().timestamp_millis();
     let target_record = SkillTargetRecord {
         id: uuid::Uuid::new_v4().to_string(),
         skill_id: skill_id.to_string(),
@@ -638,6 +731,30 @@ fn apply_add(
             continue;
         };
         let source = PathBuf::from(&skill.central_path);
+
+        // Agents are delivered by the capability engine (symlink for Claude/Pi,
+        // rendered file for Codex/Copilot).  Route through sync_single_skill_to_tool
+        // so every asset type gets the same logic as the single-command path.
+        // Skills continue on the direct sync_engine path below (byte-for-byte
+        // identical to the original loop body).
+        if skill.asset_type == AssetType::Agent {
+            for tool_key in adapters.keys() {
+                match sync_single_skill_to_tool(store, skill_id, tool_key) {
+                    Ok(()) => {
+                        synced += 1;
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        log::warn!(
+                            "apply_skills_to_tools: failed to sync agent {skill_id} ({}) to {tool_key}: {e}",
+                            skill.name,
+                        );
+                    }
+                }
+            }
+            continue;
+        }
+
         let target_name = sync_engine::target_dir_name(&source, &skill.name);
         for (tool_key, adapter) in &adapters {
             let target = adapter.skills_dir().join(&target_name);
@@ -931,7 +1048,10 @@ mod sync_desired_targets_tests {
         sync_desired_targets(&store, &desired).unwrap();
 
         // Sync must have run — target should now exist with the source content.
-        assert!(target.join("SKILL.md").exists(), "missing target was not re-synced");
+        assert!(
+            target.join("SKILL.md").exists(),
+            "missing target was not re-synced"
+        );
 
         central_repo::set_test_base_dir_override(None);
     }
@@ -977,5 +1097,578 @@ mod skip_check_mode_tests {
     fn unknown_existing_mode_is_incompatible() {
         assert!(skip_check_mode("garbage", SyncMode::Symlink).is_none());
         assert!(skip_check_mode("", SyncMode::Copy).is_none());
+    }
+}
+
+// ── Tests for sync_single_skill_to_tool with AssetType::Agent ────────────────
+//
+// These tests drive the FULL sync_single_skill_to_tool path with an Agent
+// record and verify BOTH the on-disk artifact AND the skill_targets row for
+// each of the three agent-capable adapters (claude_code, codex, github_copilot).
+//
+// They also confirm that a refused/unsupported delivery does NOT insert a
+// successful-symlink row (Defect 2 regression guard).
+#[cfg(test)]
+#[cfg(unix)]
+mod sync_single_skill_agent_tests {
+    use super::*;
+    use crate::core::{central_repo, skill_store::SkillRecord};
+    use std::collections::HashMap;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // Minimal canonical-agent .md file.  The frontmatter must be parseable by
+    // canonical_agent_from_file; name becomes the artifact filename stem.
+    const AGENT_MD: &str = "\
+---
+name: test-agent
+description: A test agent for sync tests.
+tools:
+  - Read
+---
+
+Body content here.
+";
+
+    /// Build a store with:
+    ///  - central_repo redirected to a temp dir (so insert_skill does not
+    ///    write to the real ~/.skills-manager repo)
+    ///  - one Agent SkillRecord whose central_path points to a real .md file
+    ///  - custom_tool_paths overriding claude_code / codex / github_copilot to
+    ///    temp dirs so is_installed() returns true and delivery writes there
+    ///
+    /// Returns (store, lock, agent_file_tempdir, [claude_home, codex_home,
+    /// copilot_home]).  Keep all TempDirs alive for the duration of the test.
+    fn setup() -> (
+        crate::core::skill_store::SkillStore,
+        std::sync::MutexGuard<'static, ()>,
+        tempfile::TempDir, // central repo temp dir (keeps lock alive)
+        tempfile::TempDir, // claude home temp dir
+        tempfile::TempDir, // codex home temp dir
+        tempfile::TempDir, // copilot home temp dir
+    ) {
+        let lock = central_repo::test_base_dir_lock();
+        let central_tmp = tempdir().unwrap();
+        let base = central_tmp.path().join("repo");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+        central_repo::ensure_central_repo().unwrap();
+        let store = crate::core::skill_store::SkillStore::new(&base.join("test.db")).unwrap();
+
+        // Write the agent .md file into the central tmp dir.
+        let agent_file = central_tmp.path().join("test-agent.md");
+        fs::write(&agent_file, AGENT_MD).unwrap();
+
+        // Temp homes for each adapter.  override_skills_dir must point to the
+        // skills sub-directory; home is derived as skills_dir().parent().
+        let claude_tmp = tempdir().unwrap();
+        let codex_tmp = tempdir().unwrap();
+        let copilot_tmp = tempdir().unwrap();
+
+        // Each override_skills_dir is <home>/skills so that home = <tmp_root>.
+        // deliver_asset writes to <home>/agents/<id>.<ext>.
+        let claude_skills = claude_tmp.path().join("skills");
+        let codex_skills = codex_tmp.path().join("skills");
+        let copilot_skills = copilot_tmp.path().join("skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+        fs::create_dir_all(&codex_skills).unwrap();
+        fs::create_dir_all(&copilot_skills).unwrap();
+
+        // Persist the overrides so find_adapter_with_store picks them up.
+        // custom_tool_paths is a HashMap<adapter_key, override_skills_dir>.
+        let paths: HashMap<String, String> = [
+            (
+                "claude_code".to_string(),
+                claude_skills.to_string_lossy().to_string(),
+            ),
+            (
+                "codex".to_string(),
+                codex_skills.to_string_lossy().to_string(),
+            ),
+            (
+                "github_copilot".to_string(),
+                copilot_skills.to_string_lossy().to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        store
+            .set_setting("custom_tool_paths", &serde_json::to_string(&paths).unwrap())
+            .unwrap();
+
+        // Insert the SkillRecord.
+        let now = chrono::Utc::now().timestamp();
+        store
+            .insert_skill(&SkillRecord {
+                id: "test-agent".to_string(),
+                name: "test-agent".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: None,
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: agent_file.to_string_lossy().to_string(),
+                content_hash: None,
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+                asset_type: crate::core::skill_store::AssetType::Agent,
+            })
+            .unwrap();
+
+        (store, lock, central_tmp, claude_tmp, codex_tmp, copilot_tmp)
+    }
+
+    // ── claude_code: symlink at agents/test-agent.md ───────────────────────
+
+    #[test]
+    fn agent_sync_claude_code_creates_symlink_and_records_symlink_mode() {
+        let (store, _lock, _central, claude_tmp, _codex, _copilot) = setup();
+
+        sync_single_skill_to_tool(&store, "test-agent", "claude_code").unwrap();
+
+        // On-disk: agents/test-agent.md must be a symlink.
+        let artifact = claude_tmp.path().join("agents").join("test-agent.md");
+        assert!(
+            artifact.is_symlink(),
+            "claude_code must place a symlink at agents/test-agent.md; path={artifact:?}"
+        );
+
+        // skill_targets row: mode == "symlink", status == "ok".
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        let row = targets
+            .iter()
+            .find(|r| r.tool == "claude_code")
+            .expect("skill_targets must have a row for claude_code after sync");
+        assert_eq!(row.mode, "symlink", "claude_code mode must be 'symlink'");
+        assert_eq!(row.status, "ok", "status must be ok");
+        assert_eq!(
+            row.target_path,
+            artifact.to_string_lossy().as_ref(),
+            "target_path must point to the on-disk artifact"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    // ── codex: rendered .toml at agents/test-agent.toml ──────────────────
+
+    #[test]
+    fn agent_sync_codex_renders_toml_and_records_render_mode() {
+        let (store, _lock, _central, _claude, codex_tmp, _copilot) = setup();
+
+        sync_single_skill_to_tool(&store, "test-agent", "codex").unwrap();
+
+        // On-disk: agents/test-agent.toml must be a regular file (not a symlink).
+        let artifact = codex_tmp.path().join("agents").join("test-agent.toml");
+        assert!(
+            artifact.is_file() && !artifact.is_symlink(),
+            "codex must render a real file at agents/test-agent.toml; path={artifact:?}"
+        );
+
+        // Content must be valid render_codex output (contains TOML name key).
+        let content = fs::read_to_string(&artifact).unwrap();
+        assert!(
+            content.contains("name = \"test_agent\""),
+            "codex .toml must contain TOML name field; got:\n{content}"
+        );
+
+        // Verify bytes equal render_codex output so we know it is the rendered
+        // content and not a copy of the source .md.
+        let agent =
+            crate::core::asset_render::canonical_agent_from_file(&std::path::PathBuf::from(
+                store
+                    .get_skill_by_id("test-agent")
+                    .unwrap()
+                    .unwrap()
+                    .central_path,
+            ))
+            .unwrap();
+        let expected = crate::core::asset_render::render_codex(&agent);
+        assert_eq!(
+            content, expected,
+            "codex .toml content must equal render_codex output"
+        );
+
+        // skill_targets row: mode == "render", status == "ok".
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        let row = targets
+            .iter()
+            .find(|r| r.tool == "codex")
+            .expect("skill_targets must have a row for codex after sync");
+        assert_eq!(row.mode, "render", "codex mode must be 'render'");
+        assert_eq!(row.status, "ok", "status must be ok");
+        assert_eq!(
+            row.target_path,
+            artifact.to_string_lossy().as_ref(),
+            "target_path must point to the on-disk artifact"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    // ── github_copilot: rendered .agent.md at agents/test-agent.agent.md ──
+
+    #[test]
+    fn agent_sync_copilot_renders_agent_md_and_records_render_mode() {
+        let (store, _lock, _central, _claude, _codex, copilot_tmp) = setup();
+
+        sync_single_skill_to_tool(&store, "test-agent", "github_copilot").unwrap();
+
+        // On-disk: agents/test-agent.agent.md must be a regular file.
+        let artifact = copilot_tmp
+            .path()
+            .join("agents")
+            .join("test-agent.agent.md");
+        assert!(
+            artifact.is_file() && !artifact.is_symlink(),
+            "github_copilot must render a real file at agents/test-agent.agent.md; path={artifact:?}"
+        );
+
+        // Content must be valid render_copilot output (YAML frontmatter).
+        let content = fs::read_to_string(&artifact).unwrap();
+        assert!(
+            content.contains("name:"),
+            "copilot .agent.md must contain YAML name field; got:\n{content}"
+        );
+
+        // skill_targets row: mode == "render", status == "ok".
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        let row = targets
+            .iter()
+            .find(|r| r.tool == "github_copilot")
+            .expect("skill_targets must have a row for github_copilot after sync");
+        assert_eq!(row.mode, "render", "github_copilot mode must be 'render'");
+        assert_eq!(row.status, "ok", "status must be ok");
+        assert_eq!(
+            row.target_path,
+            artifact.to_string_lossy().as_ref(),
+            "target_path must point to the on-disk artifact"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    // ── Defect 2 regression guard: Unsupported outcome must NOT insert a row ──
+    //
+    // We verify this by calling sync_single_skill_to_tool with a tool whose
+    // asset_capability returns None for AssetType::Agent (or equivalently, a
+    // tool that would produce Unsupported).  We use a custom tool definition
+    // with a skills_dir that lies outside the adapter home so the foreign-home
+    // guard fires, OR simply assert that codex with a broken home produces no
+    // "ok symlink" row.  The cleanest approach is to insert a second skill,
+    // then use an adapter whose Agent capability is intentionally absent.
+    //
+    // We use "cursor" which has no AssetType::Agent capability
+    // (asset_capability returns None -> Unsupported outcome).
+    #[test]
+    fn unsupported_adapter_does_not_insert_ok_symlink_row() {
+        let (store, _lock, _central, _claude, _codex, _copilot) = setup();
+
+        // Add cursor to custom_tool_paths with a real temp dir so is_installed()
+        // passes.  cursor returns Unsupported for AssetType::Agent.
+        let cursor_tmp = tempdir().unwrap();
+        let cursor_skills = cursor_tmp.path().join("skills");
+        fs::create_dir_all(&cursor_skills).unwrap();
+
+        let mut paths: HashMap<String, String> = store
+            .get_setting("custom_tool_paths")
+            .unwrap()
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default();
+        paths.insert(
+            "cursor".to_string(),
+            cursor_skills.to_string_lossy().to_string(),
+        );
+        store
+            .set_setting("custom_tool_paths", &serde_json::to_string(&paths).unwrap())
+            .unwrap();
+
+        // sync_single_skill_to_tool must succeed (no error) but must NOT insert
+        // a skill_targets row for cursor because Unsupported means nothing was
+        // written.
+        sync_single_skill_to_tool(&store, "test-agent", "cursor").unwrap();
+
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        assert!(
+            !targets.iter().any(|r| r.tool == "cursor"),
+            "Unsupported delivery must not insert any skill_targets row; got: {targets:?}"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    // ── Agent unsync: apply_skills_to_tools(Remove) removes all artifact kinds ─
+    //
+    // For each of the three agent-capable adapters we:
+    //   1. Sync via apply_skills_to_tools(Add) so the artifact exists on disk.
+    //   2. Unsync via apply_skills_to_tools(Remove).
+    //   3. Assert the on-disk artifact is gone.
+    //   4. Assert the skill_targets row for that tool is cleared.
+
+    #[test]
+    fn agent_unsync_claude_code_removes_symlink_and_clears_row() {
+        let (store, _lock, _central, claude_tmp, _codex, _copilot) = setup();
+
+        // Phase 1: sync so the artifact exists.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["claude_code".to_string()],
+            BatchApplyMode::Add,
+        )
+        .unwrap();
+
+        let artifact = claude_tmp.path().join("agents").join("test-agent.md");
+        assert!(
+            artifact.exists(),
+            "artifact must exist after sync; path={artifact:?}"
+        );
+
+        // Phase 2: unsync.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["claude_code".to_string()],
+            BatchApplyMode::Remove,
+        )
+        .unwrap();
+
+        // Phase 3: artifact gone.
+        assert!(
+            !artifact.exists(),
+            "claude_code symlink must be removed after unsync; path={artifact:?}"
+        );
+
+        // Phase 4: row cleared.
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        assert!(
+            !targets.iter().any(|r| r.tool == "claude_code"),
+            "skill_targets row for claude_code must be cleared after unsync; got: {targets:?}"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn agent_unsync_codex_removes_rendered_toml_and_clears_row() {
+        let (store, _lock, _central, _claude, codex_tmp, _copilot) = setup();
+
+        // Phase 1: sync.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["codex".to_string()],
+            BatchApplyMode::Add,
+        )
+        .unwrap();
+
+        let artifact = codex_tmp.path().join("agents").join("test-agent.toml");
+        assert!(
+            artifact.is_file(),
+            "codex artifact must exist after sync; path={artifact:?}"
+        );
+
+        // Phase 2: unsync.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["codex".to_string()],
+            BatchApplyMode::Remove,
+        )
+        .unwrap();
+
+        // Phase 3: artifact gone.
+        assert!(
+            !artifact.exists(),
+            "codex rendered .toml must be removed after unsync; path={artifact:?}"
+        );
+
+        // Phase 4: row cleared.
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        assert!(
+            !targets.iter().any(|r| r.tool == "codex"),
+            "skill_targets row for codex must be cleared after unsync; got: {targets:?}"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn agent_unsync_github_copilot_removes_rendered_agent_md_and_clears_row() {
+        let (store, _lock, _central, _claude, _codex, copilot_tmp) = setup();
+
+        // Phase 1: sync.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["github_copilot".to_string()],
+            BatchApplyMode::Add,
+        )
+        .unwrap();
+
+        let artifact = copilot_tmp
+            .path()
+            .join("agents")
+            .join("test-agent.agent.md");
+        assert!(
+            artifact.is_file(),
+            "copilot artifact must exist after sync; path={artifact:?}"
+        );
+
+        // Phase 2: unsync.
+        apply_skills_to_tools(
+            &store,
+            &["test-agent".to_string()],
+            &["github_copilot".to_string()],
+            BatchApplyMode::Remove,
+        )
+        .unwrap();
+
+        // Phase 3: artifact gone.
+        assert!(
+            !artifact.exists(),
+            "github_copilot rendered .agent.md must be removed after unsync; path={artifact:?}"
+        );
+
+        // Phase 4: row cleared.
+        let targets = store.get_targets_for_skill("test-agent").unwrap();
+        assert!(
+            !targets.iter().any(|r| r.tool == "github_copilot"),
+            "skill_targets row for github_copilot must be cleared after unsync; got: {targets:?}"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    // ── Batch path: sync >=2 agent ids, then batch-unsync removes all ─────────
+
+    #[test]
+    fn batch_sync_and_unsync_two_agents_delivers_and_removes_all() {
+        let lock = central_repo::test_base_dir_lock();
+        let central_tmp = tempdir().unwrap();
+        let base = central_tmp.path().join("repo");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+        central_repo::ensure_central_repo().unwrap();
+        let store = crate::core::skill_store::SkillStore::new(&base.join("test.db")).unwrap();
+
+        // Two distinct agent .md files.
+        let agent_a_file = central_tmp.path().join("agent-alpha.md");
+        let agent_b_file = central_tmp.path().join("agent-beta.md");
+        let agent_a_md = "\
+---
+name: agent-alpha
+description: Alpha agent.
+tools:
+  - Read
+---
+Body alpha.
+";
+        let agent_b_md = "\
+---
+name: agent-beta
+description: Beta agent.
+tools:
+  - Read
+---
+Body beta.
+";
+        fs::write(&agent_a_file, agent_a_md).unwrap();
+        fs::write(&agent_b_file, agent_b_md).unwrap();
+
+        // One adapter (claude_code) proves the batch path end-to-end.
+        let claude_tmp = tempdir().unwrap();
+        let claude_skills = claude_tmp.path().join("skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+
+        let paths: HashMap<String, String> = [(
+            "claude_code".to_string(),
+            claude_skills.to_string_lossy().to_string(),
+        )]
+        .into_iter()
+        .collect();
+        store
+            .set_setting("custom_tool_paths", &serde_json::to_string(&paths).unwrap())
+            .unwrap();
+
+        let now = chrono::Utc::now().timestamp();
+        for (id, file) in [
+            ("agent-alpha", &agent_a_file),
+            ("agent-beta", &agent_b_file),
+        ] {
+            store
+                .insert_skill(&SkillRecord {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    description: None,
+                    source_type: "import".to_string(),
+                    source_ref: None,
+                    source_ref_resolved: None,
+                    source_subpath: None,
+                    source_branch: None,
+                    source_revision: None,
+                    remote_revision: None,
+                    central_path: file.to_string_lossy().to_string(),
+                    content_hash: None,
+                    enabled: true,
+                    created_at: now,
+                    updated_at: now,
+                    status: "ok".to_string(),
+                    update_status: "local_only".to_string(),
+                    last_checked_at: None,
+                    last_check_error: None,
+                    asset_type: crate::core::skill_store::AssetType::Agent,
+                })
+                .unwrap();
+        }
+
+        let skill_ids = vec!["agent-alpha".to_string(), "agent-beta".to_string()];
+        let tool_keys = vec!["claude_code".to_string()];
+
+        // Batch sync: both artifacts must appear.
+        apply_skills_to_tools(&store, &skill_ids, &tool_keys, BatchApplyMode::Add).unwrap();
+
+        let artifact_a = claude_tmp.path().join("agents").join("agent-alpha.md");
+        let artifact_b = claude_tmp.path().join("agents").join("agent-beta.md");
+        assert!(
+            artifact_a.exists(),
+            "agent-alpha artifact must exist after batch sync; path={artifact_a:?}"
+        );
+        assert!(
+            artifact_b.exists(),
+            "agent-beta artifact must exist after batch sync; path={artifact_b:?}"
+        );
+
+        // Batch unsync: both artifacts must be gone and rows cleared.
+        apply_skills_to_tools(&store, &skill_ids, &tool_keys, BatchApplyMode::Remove).unwrap();
+
+        assert!(
+            !artifact_a.exists(),
+            "agent-alpha artifact must be removed after batch unsync; path={artifact_a:?}"
+        );
+        assert!(
+            !artifact_b.exists(),
+            "agent-beta artifact must be removed after batch unsync; path={artifact_b:?}"
+        );
+
+        let targets_a = store.get_targets_for_skill("agent-alpha").unwrap();
+        let targets_b = store.get_targets_for_skill("agent-beta").unwrap();
+        assert!(
+            !targets_a.iter().any(|r| r.tool == "claude_code"),
+            "skill_targets row for agent-alpha/claude_code must be cleared; got: {targets_a:?}"
+        );
+        assert!(
+            !targets_b.iter().any(|r| r.tool == "claude_code"),
+            "skill_targets row for agent-beta/claude_code must be cleared; got: {targets_b:?}"
+        );
+
+        drop(lock);
+        central_repo::set_test_base_dir_override(None);
     }
 }

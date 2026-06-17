@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -194,9 +194,7 @@ pub(crate) fn reindex_from_metadata_unlocked(store: &SkillStore) -> Result<()> {
                 .unwrap_or_else(|| "unknown".to_string()),
             last_checked_at: previous.and_then(|s| s.last_checked_at),
             last_check_error: previous.and_then(|s| s.last_check_error.clone()),
-            asset_type: previous
-                .map(|s| s.asset_type)
-                .unwrap_or(AssetType::Skill),
+            asset_type: previous.map(|s| s.asset_type).unwrap_or(AssetType::Skill),
         };
         store.upsert_skill(&record)?;
         store.set_tags_for_skill(&meta.skill_id, &meta.tags)?;
@@ -380,7 +378,7 @@ fn remove_stale_json_files(dir: &Path, expected_stems: &HashSet<String>) -> Resu
 }
 
 fn write_skill_file(skill: &SkillRecord, tags: &[String]) -> Result<()> {
-    let path = relative_skill_path(&skill.central_path)?;
+    let path = relative_skill_path(&skill.central_path, skill.asset_type)?;
     let tags = sorted_tags(tags);
     let source_ref = match skill.source_type.as_str() {
         "import" | "local" => None,
@@ -535,8 +533,8 @@ fn ensure_unique_path_keys(skills: &[SkillMetaFile]) -> Result<()> {
     Ok(())
 }
 
-fn relative_skill_path(central_path: &str) -> Result<String> {
-    let root = central_repo::skills_dir();
+fn relative_skill_path(central_path: &str, asset_type: AssetType) -> Result<String> {
+    let root = central_repo::asset_type_dir(asset_type);
     let path = PathBuf::from(central_path);
     let relative = path
         .strip_prefix(&root)
@@ -622,7 +620,7 @@ mod tests {
     use super::*;
     use crate::core::{central_repo, skill_store::SkillStore};
     use std::sync::MutexGuard;
-    use tempfile::{TempDir, tempdir};
+    use tempfile::{tempdir, TempDir};
 
     struct TestRepo {
         _lock: MutexGuard<'static, ()>,

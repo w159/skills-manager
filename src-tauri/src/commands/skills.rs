@@ -15,6 +15,7 @@ use crate::core::{
     installer,
     repo_lock::RepoLock,
     scanner,
+    scenario_service,
     skill_metadata::{self, is_valid_skill_dir},
     skill_store::{SkillRecord, SkillStore, SkillTargetRecord},
     sync_engine, sync_metadata,
@@ -2086,27 +2087,44 @@ pub fn resync_copy_targets(store: &SkillStore, skill_id: &str) -> Result<(), App
         .map_err(AppError::db)?;
 
     for target in targets {
-        if target.mode != "copy" {
-            continue;
+        if target.mode == "copy" {
+            sync_engine::sync_skill(
+                &source,
+                Path::new(&target.target_path),
+                sync_engine::SyncMode::Copy,
+            )
+            .map_err(AppError::io)?;
+
+            let updated_target = SkillTargetRecord {
+                synced_at: Some(chrono::Utc::now().timestamp_millis()),
+                status: "ok".to_string(),
+                last_error: None,
+                // Refresh the hash so the startup freshness check (#153)
+                // sees this resync as up-to-date instead of stale.
+                source_hash: skill.content_hash.clone(),
+                ..target
+            };
+            store.insert_target(&updated_target).map_err(AppError::db)?;
+        } else if target.mode == "render" {
+            // Agent targets delivered via the capability engine (codex .toml,
+            // copilot .agent.md) need re-rendering from the updated source so
+            // they never go stale after an update.  Re-deliver through
+            // sync_single_skill_to_tool which calls deliver_asset -> render_codex
+            // / render_copilot with the current central_path content.
+            if let Err(e) =
+                scenario_service::sync_single_skill_to_tool(store, &skill.id, &target.tool)
+            {
+                log::warn!(
+                    "resync_copy_targets: re-render failed for skill {} / {}: {e}",
+                    skill.id,
+                    target.tool,
+                );
+            }
         }
-
-        sync_engine::sync_skill(
-            &source,
-            Path::new(&target.target_path),
-            sync_engine::SyncMode::Copy,
-        )
-        .map_err(AppError::io)?;
-
-        let updated_target = SkillTargetRecord {
-            synced_at: Some(chrono::Utc::now().timestamp_millis()),
-            status: "ok".to_string(),
-            last_error: None,
-            // Refresh the hash so the startup freshness check (#153)
-            // sees this resync as up-to-date instead of stale.
-            source_hash: skill.content_hash.clone(),
-            ..target
-        };
-        store.insert_target(&updated_target).map_err(AppError::db)?;
+        // "symlink" and "place" targets require no resync: symlinks resolve
+        // directly to the (already-updated) central_path file, and place-mode
+        // targets are directory symlinks that remain valid after a content
+        // update.
     }
 
     Ok(())
@@ -2445,5 +2463,337 @@ mod tests {
         assert_ne!(k_a, k_b);
         assert_eq!(k_a, "category-a/foo");
         assert_eq!(k_b, "category-b/foo");
+    }
+
+    // ── Agent update re-renders delivered targets ─────────────────────────────
+    //
+    // Acceptance-criterion test for agent update/version-check parity.
+    //
+    // The gap being tested: `resync_copy_targets` previously skipped all
+    // non-copy targets (mode != "copy"), so agent render targets (codex .toml,
+    // copilot .agent.md) went stale after any update that called it.
+    //
+    // Test structure:
+    //   1. Insert an Agent SkillRecord whose central_path is a real .md file.
+    //   2. Deliver it to codex + copilot so render targets exist on disk.
+    //   3. Overwrite the central_path .md with new content and update the DB
+    //      content_hash (mirroring what update_git_skill_internal /
+    //      reimport_local_skill_internal would do).
+    //   4. Call resync_copy_targets directly (the function the update paths
+    //      both converge on).
+    //   5. Assert:
+    //      (a) The codex .toml now contains the NEW rendered body.
+    //      (b) The copilot .agent.md now contains the NEW rendered body.
+    //      (c) Bytes are byte-exact matches of render_codex / render_copilot.
+    //
+    // This drives resync_copy_targets (not deliver_asset directly) to cover
+    // the render branch added by the fix.
+    #[cfg(unix)]
+    #[test]
+    fn agent_update_rerenders_codex_and_copilot_targets() {
+        use crate::core::{
+            asset_render::{canonical_agent_from_file, render_codex, render_copilot},
+            skill_store::AssetType,
+        };
+        use std::collections::HashMap;
+
+        // ── Setup central repo override ───────────────────────────────────────
+        let repo = test_repo();
+
+        // Write the initial agent .md into the central repo agents dir.
+        // For agents, central_path is a FILE (not a directory).
+        let agents_central_dir =
+            central_repo::asset_type_dir(crate::core::skill_store::AssetType::Agent);
+        fs::create_dir_all(&agents_central_dir).unwrap();
+        let agent_file = agents_central_dir.join("my-agent.md");
+        let initial_md = "\
+---
+name: my-agent
+description: A test agent.
+tools:
+  - Read
+  - Bash
+---
+Initial body.
+";
+        fs::write(&agent_file, initial_md).unwrap();
+
+        // ── Register custom tool paths so is_installed() returns true ─────────
+        let codex_tmp = tempdir().unwrap();
+        let copilot_tmp = tempdir().unwrap();
+        let codex_skills = codex_tmp.path().join("skills");
+        let copilot_skills = copilot_tmp.path().join("skills");
+        fs::create_dir_all(&codex_skills).unwrap();
+        fs::create_dir_all(&copilot_skills).unwrap();
+
+        let paths: HashMap<String, String> = [
+            (
+                "codex".to_string(),
+                codex_skills.to_string_lossy().to_string(),
+            ),
+            (
+                "github_copilot".to_string(),
+                copilot_skills.to_string_lossy().to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        repo.store
+            .set_setting("custom_tool_paths", &serde_json::to_string(&paths).unwrap())
+            .unwrap();
+
+        // ── Insert the agent SkillRecord ──────────────────────────────────────
+        // central_path = file path (matching how the importer stores agents).
+        let now = chrono::Utc::now().timestamp_millis();
+        let initial_hash = "hash-v1".to_string();
+        let record = SkillRecord {
+            id: "my-agent".to_string(),
+            name: "my-agent".to_string(),
+            description: Some("A test agent.".to_string()),
+            source_type: "import".to_string(),
+            source_ref: Some(agent_file.to_string_lossy().to_string()),
+            source_ref_resolved: None,
+            source_subpath: None,
+            source_branch: None,
+            source_revision: None,
+            remote_revision: None,
+            central_path: agent_file.to_string_lossy().to_string(),
+            content_hash: Some(initial_hash.clone()),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            status: "ok".to_string(),
+            update_status: "local_only".to_string(),
+            last_checked_at: None,
+            last_check_error: None,
+            asset_type: AssetType::Agent,
+        };
+        repo.store.insert_skill(&record).unwrap();
+
+        // ── Initial delivery: sync to codex and copilot ───────────────────────
+        scenario_service::sync_single_skill_to_tool(&repo.store, "my-agent", "codex").unwrap();
+        scenario_service::sync_single_skill_to_tool(
+            &repo.store,
+            "my-agent",
+            "github_copilot",
+        )
+        .unwrap();
+
+        let codex_target = codex_tmp.path().join("agents").join("my-agent.toml");
+        let copilot_target = copilot_tmp.path().join("agents").join("my-agent.agent.md");
+        assert!(
+            codex_target.exists(),
+            "codex target must exist after initial delivery"
+        );
+        assert!(
+            copilot_target.exists(),
+            "copilot target must exist after initial delivery"
+        );
+
+        // Confirm initial render contains the old body.
+        let codex_initial = fs::read_to_string(&codex_target).unwrap();
+        let copilot_initial = fs::read_to_string(&copilot_target).unwrap();
+        assert!(
+            codex_initial.contains("Initial body"),
+            "codex initial render must contain 'Initial body'; got:\n{codex_initial}"
+        );
+        assert!(
+            copilot_initial.contains("Initial body"),
+            "copilot initial render must contain 'Initial body'; got:\n{copilot_initial}"
+        );
+
+        // ── Mutate: overwrite central_path .md with new body content ──────────
+        // This simulates what update_git_skill_internal / reimport_local does
+        // when it swaps in the updated file.
+        let updated_md = "\
+---
+name: my-agent
+description: A test agent.
+tools:
+  - Read
+  - Bash
+---
+Updated body after source change.
+";
+        fs::write(&agent_file, updated_md).unwrap();
+
+        // Update the DB content_hash (mirrors update_skill_after_install).
+        let new_hash = "hash-v2".to_string();
+        repo.store
+            .update_skill_after_install(
+                "my-agent",
+                "my-agent",
+                Some("A test agent."),
+                None,
+                None,
+                Some(&new_hash),
+                "local_only",
+            )
+            .unwrap();
+
+        // ── Run the update convergence point ──────────────────────────────────
+        // Both update_git_skill_internal and reimport_local_skill_internal call
+        // resync_copy_targets after updating the central file + DB hash.
+        resync_copy_targets(&repo.store, "my-agent").unwrap();
+
+        // (a) content_hash on the stored record must reflect the new hash.
+        let updated_record = repo
+            .store
+            .get_skill_by_id("my-agent")
+            .unwrap()
+            .expect("skill must still exist");
+        assert_ne!(
+            updated_record.content_hash.as_deref(),
+            Some(initial_hash.as_str()),
+            "content_hash must differ from initial after update"
+        );
+
+        // (b) Rendered targets must contain the NEW body text.
+        let codex_after = fs::read_to_string(&codex_target).unwrap();
+        let copilot_after = fs::read_to_string(&copilot_target).unwrap();
+
+        assert!(
+            codex_after.contains("Updated body after source change"),
+            "codex target must reflect updated body; got:\n{codex_after}"
+        );
+        assert!(
+            copilot_after.contains("Updated body after source change"),
+            "copilot target must reflect updated body; got:\n{copilot_after}"
+        );
+
+        // (c) Byte-exact match against the render functions.
+        let canonical = canonical_agent_from_file(&agent_file).unwrap();
+        assert_eq!(
+            codex_after,
+            render_codex(&canonical),
+            "codex file must equal render_codex output after update"
+        );
+        assert_eq!(
+            copilot_after,
+            render_copilot(&canonical),
+            "copilot file must equal render_copilot output after update"
+        );
+    }
+
+    // ── File-source agent reimport ────────────────────────────────────────────
+    //
+    // Acceptance test for the single-FILE source branch in installer.rs.
+    //
+    // Before the fix, install_from_local_to_destination routed non-directory
+    // sources through from_archive, which bailed with "Unsupported archive
+    // format: md".  After the fix it copies the file directly.
+    //
+    // Test structure:
+    //   1. Write a source .md file in a temp dir.
+    //   2. Install it via install_from_local_to_destination to a central_path
+    //      file and insert the SkillRecord with source_type="import".
+    //   3. Mutate the source file.
+    //   4. Call reimport_local_skill_internal (the real public path).
+    //   5. Assert: status is not "error", content_hash changed, central_path
+    //      contains the new content.
+    #[test]
+    fn reimport_file_source_agent_succeeds_and_updates_hash() {
+        let repo = test_repo();
+
+        // Write source .md into a temp dir outside the central repo.
+        let source_tmp = tempdir().unwrap();
+        let source_file = source_tmp.path().join("my-agent.md");
+        let initial_content = "\
+---
+name: my-agent
+description: Initial.
+---
+Initial body.
+";
+        fs::write(&source_file, initial_content).unwrap();
+
+        // Central file lives under asset_type_dir(Agent) — exactly where the real importer puts it.
+        let central_dir =
+            central_repo::asset_type_dir(crate::core::skill_store::AssetType::Agent);
+        fs::create_dir_all(&central_dir).unwrap();
+        let central_file = central_dir.join("my-agent.md");
+
+        // Install the file to its central location.
+        let install_result = installer::install_from_local_to_destination(
+            &source_file,
+            Some("my-agent"),
+            &central_file,
+        )
+        .expect("initial install of file-source agent must succeed");
+
+        let initial_hash = install_result.content_hash.clone();
+        assert!(central_file.exists(), "central file must exist after install");
+        assert!(
+            fs::read_to_string(&central_file)
+                .unwrap()
+                .contains("Initial body"),
+            "central file must contain initial content after install"
+        );
+
+        // Insert the SkillRecord with source_ref pointing at the source file.
+        let now = chrono::Utc::now().timestamp_millis();
+        let record = SkillRecord {
+            id: "file-agent-1".to_string(),
+            name: "my-agent".to_string(),
+            description: Some("Initial.".to_string()),
+            source_type: "import".to_string(),
+            source_ref: Some(source_file.to_string_lossy().to_string()),
+            source_ref_resolved: None,
+            source_subpath: None,
+            source_branch: None,
+            source_revision: None,
+            remote_revision: None,
+            central_path: central_file.to_string_lossy().to_string(),
+            content_hash: Some(initial_hash.clone()),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            status: "ok".to_string(),
+            update_status: "local_only".to_string(),
+            last_checked_at: None,
+            last_check_error: None,
+            asset_type: crate::core::skill_store::AssetType::Agent,
+        };
+        repo.store.insert_skill(&record).unwrap();
+
+        // Mutate the source file.
+        let updated_content = "\
+---
+name: my-agent
+description: Updated.
+---
+Updated body after source change.
+";
+        fs::write(&source_file, updated_content).unwrap();
+
+        // Call the real reimport path.
+        let dto = reimport_local_skill_internal(&repo.store, "file-agent-1")
+            .expect("reimport_local_skill_internal must not return an error for a file-source agent");
+
+        // Status must not be "error".
+        assert_ne!(
+            dto.status, "error",
+            "reimport must not set status=error; got status={:?}",
+            dto.status
+        );
+
+        // content_hash must have changed (read from SkillRecord; ManagedSkillDto has no content_hash field).
+        let updated_record = repo
+            .store
+            .get_skill_by_id("file-agent-1")
+            .unwrap()
+            .expect("skill record must exist after reimport");
+        assert_ne!(
+            updated_record.content_hash.as_deref(),
+            Some(initial_hash.as_str()),
+            "content_hash must differ from initial after reimport"
+        );
+
+        // central_path file must contain the new content.
+        let central_after = fs::read_to_string(&central_file).unwrap();
+        assert!(
+            central_after.contains("Updated body after source change"),
+            "central file must contain updated content after reimport; got:\n{central_after}"
+        );
     }
 }

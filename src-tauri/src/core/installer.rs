@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use sha2::Digest;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -20,12 +21,26 @@ enum PreparedSource {
         _temp_dir: tempfile::TempDir,
         skill_dir: PathBuf,
     },
+    /// A single file (e.g. an agent .md or .toml). The path IS the content;
+    /// it is copied directly to the destination file without extraction.
+    SingleFile(PathBuf),
 }
 
 impl PreparedSource {
     fn open(source: &Path) -> Result<Self> {
         if source.is_dir() {
             Ok(PreparedSource::Directory(source.to_path_buf()))
+        } else if source.is_file() {
+            // Check known archive extensions before treating as a plain file.
+            let ext = source
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if ext == "zip" || ext == "skill" {
+                Self::from_archive(source)
+            } else {
+                Ok(PreparedSource::SingleFile(source.to_path_buf()))
+            }
         } else {
             Self::from_archive(source)
         }
@@ -75,7 +90,14 @@ impl PreparedSource {
         match self {
             PreparedSource::Directory(p) => p,
             PreparedSource::Archive { skill_dir, .. } => skill_dir,
+            // For a single file the "skill dir" concept does not apply;
+            // callers that need it fall back to the file's parent.
+            PreparedSource::SingleFile(p) => p,
         }
+    }
+
+    fn is_single_file(&self) -> bool {
+        matches!(self, PreparedSource::SingleFile(_))
     }
 }
 
@@ -106,6 +128,11 @@ pub fn install_from_local_to_destination(
     destination: &Path,
 ) -> Result<InstallResult> {
     let prepared = PreparedSource::open(source)?;
+
+    if prepared.is_single_file() {
+        return install_single_file_to_destination(source, name, destination);
+    }
+
     let skill_dir = prepared.skill_dir();
 
     let skill_name = match name {
@@ -131,7 +158,62 @@ pub fn resolve_local_skill_name(source: &Path, name: Option<&str>) -> Result<Str
 
 pub fn hash_local_source(source: &Path) -> Result<String> {
     let prepared = PreparedSource::open(source)?;
+    if prepared.is_single_file() {
+        return hash_single_file(source);
+    }
     content_hash::hash_directory(prepared.skill_dir())
+}
+
+/// Hash a single file using the same SHA-256 scheme as [`content_hash::hash_directory`]:
+/// feed the file's basename bytes then its content bytes into the hasher.
+pub fn hash_single_file(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let basename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let content = std::fs::read(path)
+        .with_context(|| format!("Failed to read file for hashing: {:?}", path))?;
+    let mut hasher = Sha256::new();
+    hasher.update(basename.as_bytes());
+    hasher.update(&content);
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Install a single source file by copying it to `destination` (which is the
+/// destination file path, not a directory). Mirrors `install_skill_dir_to_destination`
+/// but for the single-file agent case where `central_path` IS the file.
+fn install_single_file_to_destination(
+    source: &Path,
+    name: Option<&str>,
+    destination: &Path,
+) -> Result<InstallResult> {
+    let skill_name = match name {
+        Some(n) if !n.is_empty() => {
+            sanitize_skill_name(n).ok_or_else(|| anyhow::anyhow!("Invalid skill name: '{}'", n))?
+        }
+        _ => source
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "agent".to_string()),
+    };
+
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create parent dir for {:?}", destination))?;
+    }
+
+    std::fs::copy(source, destination)
+        .with_context(|| format!("Failed to copy {:?} to {:?}", source, destination))?;
+
+    let hash = hash_single_file(destination)?;
+
+    Ok(InstallResult {
+        name: skill_name,
+        description: None,
+        central_path: destination.to_path_buf(),
+        content_hash: hash,
+    })
 }
 
 pub fn install_from_git_dir(source: &Path, name: Option<&str>) -> Result<InstallResult> {

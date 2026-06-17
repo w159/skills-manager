@@ -1445,22 +1445,23 @@ mod scenario_membership_tests {
         let tmp = tempdir().unwrap();
         let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
 
-        store.insert_scenario(&ScenarioRecord {
-            id: "s1".to_string(),
-            name: "S1".to_string(),
-            description: None,
-            icon: None,
-            sort_order: 0,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
+        store
+            .insert_scenario(&ScenarioRecord {
+                id: "s1".to_string(),
+                name: "S1".to_string(),
+                description: None,
+                icon: None,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            })
+            .unwrap();
         store.upsert_skill(&sample_skill("k1")).unwrap();
 
         let memberships = vec![
-            membership("s1", "k1"),       // valid
-            membership("s1", "ghost"),    // skill missing
-            membership("ghost-s", "k1"),  // scenario missing
+            membership("s1", "k1"),      // valid
+            membership("s1", "ghost"),   // skill missing
+            membership("ghost-s", "k1"), // scenario missing
         ];
 
         // Must not panic with a FOREIGN KEY constraint failure.
@@ -1470,13 +1471,83 @@ mod scenario_membership_tests {
 
         assert_eq!(store.get_skill_ids_for_scenario("s1").unwrap(), vec!["k1"]);
         assert_eq!(
-            store.get_enabled_tools_for_scenario_skill("s1", "k1").unwrap(),
+            store
+                .get_enabled_tools_for_scenario_skill("s1", "k1")
+                .unwrap(),
             vec!["ToolA"]
         );
         assert!(store
             .get_enabled_tools_for_scenario_skill("ghost-s", "k1")
             .unwrap()
             .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod asset_type_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn agent_skill(id: &str) -> SkillRecord {
+        SkillRecord {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: None,
+            source_type: "import".to_string(),
+            source_ref: None,
+            source_ref_resolved: None,
+            source_subpath: None,
+            source_branch: None,
+            source_revision: None,
+            remote_revision: None,
+            central_path: format!("/tmp/{id}"),
+            content_hash: None,
+            enabled: true,
+            created_at: 1,
+            updated_at: 1,
+            status: "ok".to_string(),
+            update_status: "local_only".to_string(),
+            last_checked_at: None,
+            last_check_error: None,
+            asset_type: AssetType::Agent,
+        }
+    }
+
+    #[test]
+    fn agent_typed_record_round_trips_with_delivery_target() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+
+        // Insert a SkillRecord with asset_type = AssetType::Agent.
+        store.insert_skill(&agent_skill("agent-1")).unwrap();
+
+        // Write a SkillTargetRecord for that skill.
+        let target = SkillTargetRecord {
+            id: "tgt-1".to_string(),
+            skill_id: "agent-1".to_string(),
+            tool: "codex".to_string(),
+            target_path: "/home/user/.codex/agents/agent-1".to_string(),
+            mode: "symlink".to_string(),
+            status: "ok".to_string(),
+            synced_at: None,
+            last_error: None,
+            source_hash: None,
+        };
+        store.insert_target(&target).unwrap();
+
+        // Read the skill back and assert asset_type survived as Agent.
+        let retrieved = store
+            .get_skill_by_id("agent-1")
+            .unwrap()
+            .expect("skill not found");
+        assert_eq!(retrieved.asset_type, AssetType::Agent);
+
+        // Read the target row back and assert tool/target_path/mode match.
+        let targets = store.get_targets_for_skill("agent-1").unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].tool, "codex");
+        assert_eq!(targets[0].target_path, "/home/user/.codex/agents/agent-1");
+        assert_eq!(targets[0].mode, "symlink");
     }
 }
 

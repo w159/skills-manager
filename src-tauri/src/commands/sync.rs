@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 
 use crate::core::{
     error::AppError,
-    scenario_service,
+    scenario_service::{self, BatchApplyMode},
     skill_store::SkillStore,
     sync_engine, sync_metadata, tool_adapters,
     tool_service,
@@ -284,6 +284,59 @@ pub async fn set_skill_tool_toggle(
         }
 
         Ok(())
+    })
+    .await?;
+    if result.is_ok() {
+        schedule_tray_refresh(&app);
+    }
+    result
+}
+
+/// Sync a list of assets (by id) to a list of tools in a single call.
+///
+/// Mirrors `apply_skills_to_tools(BatchApplyMode::Add)`.  Asset type is
+/// transparent: agents route through the capability engine; skills go through
+/// the existing sync_engine path.  Active-preset toggles are NOT modified —
+/// this is a pure file-delivery + skill_targets operation.
+#[tauri::command]
+pub async fn batch_sync_skills_to_tools(
+    app: AppHandle,
+    skill_ids: Vec<String>,
+    tool_keys: Vec<String>,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        scenario_service::apply_skills_to_tools(&store, &skill_ids, &tool_keys, BatchApplyMode::Add)
+    })
+    .await?;
+    if result.is_ok() {
+        schedule_tray_refresh(&app);
+    }
+    result
+}
+
+/// Remove a list of assets (by id) from a list of tools in a single call.
+///
+/// Mirrors `apply_skills_to_tools(BatchApplyMode::Remove)`.  Shared physical
+/// paths are only removed when no remaining skill_targets row references them,
+/// so removing one preset's tools never wipes another tool's still-active files.
+/// Active-preset toggles are NOT modified.
+#[tauri::command]
+pub async fn batch_unsync_skills_from_tools(
+    app: AppHandle,
+    skill_ids: Vec<String>,
+    tool_keys: Vec<String>,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        scenario_service::apply_skills_to_tools(
+            &store,
+            &skill_ids,
+            &tool_keys,
+            BatchApplyMode::Remove,
+        )
     })
     .await?;
     if result.is_ok() {

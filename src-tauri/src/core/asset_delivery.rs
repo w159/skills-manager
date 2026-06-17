@@ -37,9 +37,9 @@ fn symlink_resolves_to_central_repo(target: &Path, central_root: &Path) -> bool 
 }
 
 use crate::core::asset_render::{render_codex, render_copilot, CanonicalAgent};
-use crate::core::tool_adapters::Renderer;
 use crate::core::skill_store::AssetType;
 use crate::core::sync_engine::{sync_skill, write_rendered_file, SyncMode};
+use crate::core::tool_adapters::Renderer;
 use crate::core::tool_adapters::ToolAdapter;
 
 // ---------------------------------------------------------------------------
@@ -223,9 +223,7 @@ pub fn deliver_asset(
     let target = match capability.filename_rule {
         Some(rule) => {
             // Interpolate {id} and {name} in the filename template.
-            let filename = rule
-                .replace("{id}", asset.id)
-                .replace("{name}", asset.name);
+            let filename = rule.replace("{id}", asset.id).replace("{name}", asset.name);
             subdir.join(filename)
         }
         // Place mode: target is a symlink inside the subdir named after the
@@ -253,8 +251,7 @@ pub fn deliver_asset(
     // test-override set by set_test_base_dir_override.  This lets
     // backup_foreign_target recognise any symlink resolving into the real
     // central repo (~/.skills-manager by default) as "already managed".
-    let central_root: Option<PathBuf> =
-        Some(crate::core::central_repo::base_dir());
+    let central_root: Option<PathBuf> = Some(crate::core::central_repo::base_dir());
 
     match capability.mode {
         // ── Symlink ──────────────────────────────────────────────────────────
@@ -402,7 +399,11 @@ mod tests {
         );
         assert!(target.exists(), "target must exist");
         assert!(target.is_symlink(), "Claude agent must be a symlink");
-        assert_eq!(fs::canonicalize(&target).unwrap(), fs::canonicalize(&src).unwrap(), "symlink must resolve to source file");
+        assert_eq!(
+            fs::canonicalize(&target).unwrap(),
+            fs::canonicalize(&src).unwrap(),
+            "symlink must resolve to source file"
+        );
     }
 
     #[cfg(unix)]
@@ -430,7 +431,11 @@ mod tests {
             result
         );
         assert!(target.is_symlink(), "Pi agent must be a symlink");
-        assert_eq!(fs::canonicalize(&target).unwrap(), fs::canonicalize(&src).unwrap(), "symlink must resolve to source file");
+        assert_eq!(
+            fs::canonicalize(&target).unwrap(),
+            fs::canonicalize(&src).unwrap(),
+            "symlink must resolve to source file"
+        );
     }
 
     #[cfg(unix)]
@@ -469,7 +474,10 @@ mod tests {
         );
         // Also confirm bytes equal render_codex output.
         let expected = render_codex(&agent);
-        assert_eq!(content, expected, "file bytes must equal render_codex output");
+        assert_eq!(
+            content, expected,
+            "file bytes must equal render_codex output"
+        );
     }
 
     #[cfg(unix)]
@@ -504,7 +512,10 @@ mod tests {
 
         let content = fs::read_to_string(&target).unwrap();
         let expected = render_copilot(&agent);
-        assert_eq!(content, expected, "file bytes must equal render_copilot output");
+        assert_eq!(
+            content, expected,
+            "file bytes must equal render_copilot output"
+        );
     }
 
     #[cfg(unix)]
@@ -889,9 +900,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn no_backup_when_target_symlink_resolves_inside_central_repo() {
-        use crate::core::central_repo::{
-            set_test_base_dir_override, test_base_dir_lock,
-        };
+        use crate::core::central_repo::{set_test_base_dir_override, test_base_dir_lock};
 
         // Hold the global base-dir mutex for the duration of the test.
         let _guard = test_base_dir_lock();
@@ -960,5 +969,129 @@ mod tests {
             "no .backup-* file must exist when the target symlink resolves \
              inside the central repo root"
         );
+    }
+
+    // ── AGENT SYNC PATH PARITY ────────────────────────────────────────────────
+    //
+    // Verifies that an AssetType::Agent record delivered via deliver_asset
+    // produces exactly the right artifact at each of the three distinct
+    // delivery targets:
+    //
+    //   claude_code  ->  agents/<id>.md   (symlink to source)
+    //   codex        ->  agents/<id>.toml (real rendered file, render_codex bytes)
+    //   github_copilot -> agents/<id>.agent.md (real rendered file, render_copilot bytes)
+    //
+    // This is the acceptance-criterion test for the sync-path parity feature:
+    // sync_single_skill_to_tool routes Agent-typed records through deliver_asset
+    // instead of sync_engine::sync_skill.
+    #[cfg(unix)]
+    #[test]
+    fn sync_agent_typed_record_delivers_to_all_three_targets() {
+        use crate::core::asset_render::{render_codex, render_copilot};
+
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("my-agent.md");
+        fs::write(&src, b"# My Agent\nsome body").unwrap();
+
+        let agent = CanonicalAgent {
+            id: "my-agent".to_string(),
+            display_name: Some("My Agent".to_string()),
+            description: "Test agent for sync path parity.".to_string(),
+            tools: vec!["Read".to_string(), "Bash".to_string()],
+            codex_reasoning_effort: None,
+            codex_sandbox_mode: None,
+            body: "You are a test agent.".to_string(),
+        };
+
+        // ── Claude: symlink named <id>.md ─────────────────────────────────────
+        {
+            let home = tempdir().unwrap();
+            let a = adapter("claude_code", home.path());
+            let input = AssetInput {
+                asset_type: AssetType::Agent,
+                source: &src,
+                id: "my-agent",
+                name: "my-agent",
+                canonical_agent: Some(&agent),
+            };
+            let result = deliver_asset(&a, home.path(), &input).unwrap();
+            let target = home.path().join("agents").join("my-agent.md");
+
+            assert!(
+                matches!(result, DeliveryOutcome::Symlinked(_)),
+                "claude_code agent must be Symlinked, got {:?}",
+                result
+            );
+            assert!(target.is_symlink(), "claude_code target must be a symlink");
+            assert_eq!(
+                fs::canonicalize(&target).unwrap(),
+                fs::canonicalize(&src).unwrap(),
+                "claude_code symlink must resolve to the source file"
+            );
+        }
+
+        // ── Codex: real file named <id>.toml, bytes == render_codex output ────
+        {
+            let home = tempdir().unwrap();
+            let a = adapter("codex", home.path());
+            let input = AssetInput {
+                asset_type: AssetType::Agent,
+                source: &src,
+                id: "my-agent",
+                name: "my-agent",
+                canonical_agent: Some(&agent),
+            };
+            let result = deliver_asset(&a, home.path(), &input).unwrap();
+            let target = home.path().join("agents").join("my-agent.toml");
+
+            assert!(
+                matches!(result, DeliveryOutcome::Rendered(_)),
+                "codex agent must be Rendered, got {:?}",
+                result
+            );
+            assert!(target.exists(), "codex target file must exist");
+            assert!(
+                !target.is_symlink(),
+                "codex target must be a real file, not a symlink"
+            );
+            let on_disk = fs::read_to_string(&target).unwrap();
+            let expected = render_codex(&agent);
+            assert_eq!(
+                on_disk, expected,
+                "codex file bytes must equal render_codex output"
+            );
+        }
+
+        // ── Copilot: real file named <id>.agent.md, bytes == render_copilot ───
+        {
+            let home = tempdir().unwrap();
+            let a = adapter("github_copilot", home.path());
+            let input = AssetInput {
+                asset_type: AssetType::Agent,
+                source: &src,
+                id: "my-agent",
+                name: "my-agent",
+                canonical_agent: Some(&agent),
+            };
+            let result = deliver_asset(&a, home.path(), &input).unwrap();
+            let target = home.path().join("agents").join("my-agent.agent.md");
+
+            assert!(
+                matches!(result, DeliveryOutcome::Rendered(_)),
+                "github_copilot agent must be Rendered, got {:?}",
+                result
+            );
+            assert!(target.exists(), "copilot target file must exist");
+            assert!(
+                !target.is_symlink(),
+                "copilot target must be a real file, not a symlink"
+            );
+            let on_disk = fs::read_to_string(&target).unwrap();
+            let expected = render_copilot(&agent);
+            assert_eq!(
+                on_disk, expected,
+                "copilot file bytes must equal render_copilot output"
+            );
+        }
     }
 }
