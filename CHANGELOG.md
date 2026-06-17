@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - Multi-asset-type management (Slice 1)
+
+### Release Overview
+- Generalizes skills-manager from skills-only to a six-type asset library: skills, agents, commands, hooks, scripts, and rules. Agents are rendered per coding-agent format (Codex .toml, Copilot .agent.md). A read-only importer seeds the app from an agentic-tools workspace. Coexistence backup prevents clobbering existing runtime dirs.
+
+### User-facing
+- **Manage agents, commands, hooks, scripts, and rules alongside skills** -- The library view now shows a six-tab bar (/library/:assetType). Each tab lists managed assets of that type and exposes Sync, Remove, and Import actions (src/views/AssetLibrary.tsx, commit e365d76).
+- **Agent assets render to the correct format per coding agent** -- Claude and Pi receive a symlinked .md file; Codex receives a rendered .toml; Copilot receives a rendered .agent.md. Rendering is byte-faithful to the output of agentic-tools/scripts/agent_assets.py (src-tauri/src/core/asset_render.rs, commit c927417).
+- **Import from an agentic-tools workspace** -- Point the importer at an agentic-tools directory and it reads registry/active.json, lists candidates defaulting to the active set, and copies selected assets into the matching ~/.skills-manager/<type>/ subdir. The source workspace is never modified (src-tauri/src/core/importer.rs, commit 1c85db7).
+- **Existing runtime dirs are backed up before the app takes over** -- When the app first manages a target directory that already exists (e.g. ~/.claude/agents populated by setup.py), it renames it to <dir>.backup-<timestamp> before writing. Existing content is preserved (src-tauri/src/core/deliver_asset.rs, commit b556014).
+
+### Developer & Governance
+- AssetType enum (skill | agent | command | hook | script | rule) added with additive asset_type column + backfill migration on the skills table; existing rows default to 'skill' (src-tauri/src/core/skill_store.rs, commit 8e67488).
+- Per-(agent x asset_type) capability matrix in tool_adapters.rs: agents->Claude/Pi symlink .md, Codex render .toml, Copilot render .agent.md; commands->Claude/Pi/Codex symlink (not Copilot); hooks/scripts/rules->Claude/Pi placed (commit c927417).
+- deliver_asset.rs capability-driven delivery engine dispatches symlink, render, or place per the matrix; unsupported cells are rejected at the boundary (commit 9370fc9).
+- get_managed_assets and deliver_managed_asset command surface added; canonical_agent_from_file parses agent frontmatter (commit aac9bc6).
+- Deliver respects tool enablement; missing-file condition returns a typed error rather than silent no-op (commit 3bad200).
+- 330 Rust tests green; backend stages independently verified end-to-end (import -> render -> disk). Frontend verified via build/lint/static type checks; live desktop runtime smoke (npm run tauri:dev) is a manual step.
+
 ## [1.23.1] - 2026-06-10
 
 ### Release Overview
