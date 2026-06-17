@@ -1009,9 +1009,10 @@ pub fn run() {
             // Importer
             commands::importer::list_import_candidates,
             commands::importer::import_selected_assets,
-            // Assets (multi-asset-type query + delivery)
+            // Assets (multi-asset-type query + delivery + delete)
             commands::assets::get_managed_assets,
             commands::assets::deliver_managed_asset,
+            commands::assets::delete_managed_asset,
             // Plugins (read-only discovery)
             commands::plugins::list_installed_plugins,
         ])

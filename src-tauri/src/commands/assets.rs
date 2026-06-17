@@ -1,8 +1,10 @@
 /// Tauri command surface for multi-asset-type queries and delivery.
 ///
-/// `get_managed_assets` — list managed records of one asset type.
-/// `deliver_managed_asset` — deliver one stored agent to all four core coding
+/// `get_managed_assets`    — list managed records of one asset type.
+/// `deliver_managed_asset` — deliver one stored asset to all four core coding
 ///   agent homes using the capability-driven delivery engine.
+/// `delete_managed_asset`  — remove the store row and central-repo copy for
+///   any asset type (does NOT touch the user's source workspace).
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
@@ -10,8 +12,11 @@ use tauri::State;
 use crate::core::{
     asset_delivery::{deliver_asset, AssetInput, DeliveryOutcome},
     asset_render::canonical_agent_from_file,
+    audit_log::AuditDraft,
     error::AppError,
+    repo_lock::RepoLock,
     skill_store::{AssetType, SkillRecord, SkillStore},
+    sync_metadata,
     tool_adapters::default_tool_adapters,
     tool_service::get_disabled_tools,
 };
@@ -169,6 +174,50 @@ pub async fn deliver_managed_asset(
         }
 
         Ok(results)
+    })
+    .await?
+}
+
+/// Remove the managed record for `asset_id` and its central-repo copy.
+///
+/// For `AssetType::Skill` the central path is a directory (removed
+/// recursively).  For every other asset type the central path is a single
+/// file (removed with `fs::remove_file`).  A missing central path is not
+/// treated as an error — the row is deleted regardless.
+///
+/// The user's source workspace (agentic-tools) is never touched.
+#[tauri::command]
+pub async fn delete_managed_asset(
+    asset_id: String,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lock = RepoLock::acquire("delete asset").map_err(AppError::db)?;
+
+        let record = store
+            .get_skill_by_id(&asset_id)
+            .map_err(AppError::db)?
+            .ok_or_else(|| AppError::not_found(format!("asset not found: {asset_id}")))?;
+
+        let central = PathBuf::from(&record.central_path);
+        if record.asset_type == AssetType::Skill {
+            if central.exists() {
+                std::fs::remove_dir_all(&central).ok();
+            }
+        } else if central.exists() {
+            std::fs::remove_file(&central).ok();
+        }
+
+        store.delete_skill(&asset_id).map_err(AppError::db)?;
+        store.log_audit(
+            AuditDraft::new("remove")
+                .skill(asset_id.clone(), record.name.clone())
+                .ok(),
+        );
+
+        sync_metadata::write_all_from_db_unlocked(&store).map_err(AppError::db)?;
+        Ok(())
     })
     .await?
 }
@@ -704,6 +753,107 @@ mod tests {
             outcome_for("github_copilot"),
             "unsupported",
             "github_copilot must NOT support Workflow assets"
+        );
+    }
+
+    // ── delete_managed_asset unit tests ───────────────────────────────────
+
+    /// Deleting a non-skill (agent) asset removes the store row and the central
+    /// file; the central file must not exist afterward.
+    #[test]
+    fn delete_managed_asset_removes_agent_row_and_central_file() {
+        let env = make_test_env();
+
+        // Create a real central file so we can verify it is removed.
+        let agent_tmp = tempdir().unwrap();
+        let agent_file = agent_tmp.path().join("my-agent.md");
+        fs::write(&agent_file, "# My Agent\n").unwrap();
+        let central_path = agent_file.to_str().unwrap();
+
+        insert_record(
+            &env.store,
+            "del-agent-1",
+            "my-agent",
+            AssetType::Agent,
+            central_path,
+        );
+
+        assert!(
+            env.store.get_skill_by_id("del-agent-1").unwrap().is_some(),
+            "record must exist before delete"
+        );
+        assert!(agent_file.exists(), "central file must exist before delete");
+
+        // Exercise the same logic as delete_managed_asset directly (no Tauri
+        // async layer in unit tests).
+        {
+            let _lock = crate::core::repo_lock::RepoLock::acquire("test-delete-agent").unwrap();
+            let record = env.store.get_skill_by_id("del-agent-1").unwrap().unwrap();
+            let central = PathBuf::from(&record.central_path);
+            // Non-skill: remove the file, not the directory.
+            if central.exists() {
+                std::fs::remove_file(&central).ok();
+            }
+            env.store.delete_skill("del-agent-1").unwrap();
+            sync_metadata::write_all_from_db_unlocked(&env.store).unwrap();
+        }
+
+        assert!(
+            env.store.get_skill_by_id("del-agent-1").unwrap().is_none(),
+            "store row must be absent after delete"
+        );
+        assert!(
+            !agent_file.exists(),
+            "central file must be removed after delete"
+        );
+    }
+
+    /// Deleting a skill asset removes the store row and the central directory
+    /// (recursively); the directory must not exist afterward.
+    #[test]
+    fn delete_managed_asset_removes_skill_row_and_central_dir() {
+        let env = make_test_env();
+
+        // Create a real central directory with a file inside.
+        let skill_tmp = tempdir().unwrap();
+        let skill_dir = skill_tmp.path().join("my-skill");
+        fs::create_dir(&skill_dir).unwrap();
+        fs::write(skill_dir.join("skill.md"), "# My Skill\n").unwrap();
+        let central_path = skill_dir.to_str().unwrap();
+
+        insert_record(
+            &env.store,
+            "del-skill-1",
+            "my-skill",
+            AssetType::Skill,
+            central_path,
+        );
+
+        assert!(
+            env.store.get_skill_by_id("del-skill-1").unwrap().is_some(),
+            "record must exist before delete"
+        );
+        assert!(skill_dir.exists(), "central dir must exist before delete");
+
+        {
+            let _lock = crate::core::repo_lock::RepoLock::acquire("test-delete-skill").unwrap();
+            let record = env.store.get_skill_by_id("del-skill-1").unwrap().unwrap();
+            let central = PathBuf::from(&record.central_path);
+            // Skill: remove the entire directory recursively.
+            if central.exists() {
+                std::fs::remove_dir_all(&central).ok();
+            }
+            env.store.delete_skill("del-skill-1").unwrap();
+            sync_metadata::write_all_from_db_unlocked(&env.store).unwrap();
+        }
+
+        assert!(
+            env.store.get_skill_by_id("del-skill-1").unwrap().is_none(),
+            "store row must be absent after delete"
+        );
+        assert!(
+            !skill_dir.exists(),
+            "central directory must be removed after delete"
         );
     }
 }

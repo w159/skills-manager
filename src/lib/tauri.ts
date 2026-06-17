@@ -767,6 +767,9 @@ export const getManagedAssets = (assetType: AssetType) =>
 export const deliverManagedAsset = (assetId: string) =>
   invoke<AdapterDeliveryResult[]>("deliver_managed_asset", { assetId });
 
+export const deleteManagedAsset = (assetId: string) =>
+  invoke<void>("delete_managed_asset", { assetId });
+
 export const listImportCandidates = (workspacePath: string) =>
   invoke<ListCandidatesResult>("list_import_candidates", { workspacePath });
 

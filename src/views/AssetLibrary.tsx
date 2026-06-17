@@ -122,7 +122,9 @@ function AssetRow({ asset, onRemoved }: AssetRowProps) {
   const handleRemoveConfirm = async () => {
     setRemoveOpen(false);
     try {
-      await api.deleteManagedSkill(asset.id);
+      // delete_managed_asset handles all asset types (row + central-repo copy).
+      // The user's source workspace is never touched.
+      await api.deleteManagedAsset(asset.id);
       toast.success(t("library.removeSuccess", { name: asset.name }));
       onRemoved();
     } catch (e) {
