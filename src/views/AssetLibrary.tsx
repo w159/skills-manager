@@ -5,11 +5,12 @@ import { useTranslation } from "react-i18next";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import {
-  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen, GitBranch,
+  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen, GitBranch, Puzzle,
   Loader2, AlertCircle, RefreshCw, Trash2, FolderOpen, X,
 } from "lucide-react";
 import { cn } from "../utils";
 import { MySkills } from "./MySkills";
+import { PluginsPanel } from "./PluginsPanel";
 import * as api from "../lib/tauri";
 import type { AssetType, ManagedAsset, ImportCandidate } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
@@ -30,6 +31,7 @@ const TABS: TabDef[] = [
   { type: "script",   label: "Scripts",   icon: FileCode2  },
   { type: "rule",     label: "Rules",     icon: BookOpen   },
   { type: "workflow", label: "Workflows", icon: GitBranch  },
+  { type: "plugin",   label: "Plugins",   icon: Puzzle     },
 ];
 
 const VALID_TYPES = new Set<string>(TABS.map((t) => t.type));
@@ -598,6 +600,16 @@ export function AssetLibrary() {
         </div>
         <MySkills />
       </>
+    );
+  }
+
+  // Plugins have their own dedicated panel (different data shape from generic assets).
+  if (activeType === "plugin") {
+    return (
+      <div className="app-page">
+        <TabBar activeType={activeType} onSelect={handleTabClick} />
+        <PluginsPanel />
+      </div>
     );
   }
 

@@ -10,6 +10,7 @@ import {
   FileCode2,
   BookOpen,
   GitBranch,
+  Puzzle,
   Globe,
   Download,
   Settings,
@@ -89,6 +90,7 @@ export function Sidebar() {
     { type: "script",    label: t("sidebar.scripts"),    icon: FileCode2  },
     { type: "rule",      label: t("sidebar.rules"),      icon: BookOpen   },
     { type: "workflow",  label: t("sidebar.workflows"),  icon: GitBranch  },
+    { type: "plugin",    label: t("sidebar.plugins"),    icon: Puzzle     },
   ] as const;
 
   const globalSkillsByAgent = useMemo(() => {

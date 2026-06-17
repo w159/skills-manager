@@ -13,6 +13,7 @@
     "scripts": "脚本",
     "rules": "规则",
     "workflows": "工作流",
+    "plugins": "插件",
     "globalWorkspace": "全局工作区",
     "lobsterAgents": "龙虾 Agent",
     "installSkills": "安装 Skills",
@@ -923,5 +924,11 @@
     "importConfirm": "导入（{{count}}）",
     "importSuccess": "已导入 {{count}} 个资产",
     "importErrors": "{{count}} 个导入失败"
+  },
+  "plugins": {
+    "emptyTitle": "未安装任何插件",
+    "emptyHint": "通过 CLI 安装插件后即可在此查看。",
+    "blocked": "已屏蔽",
+    "noAssets": "无捆绑资产"
   }
 }

@@ -13,6 +13,7 @@
     "scripts": "Scripts",
     "rules": "Rules",
     "workflows": "Workflows",
+    "plugins": "Plugins",
     "globalWorkspace": "Global Workspace",
     "lobsterAgents": "Lobster Agents",
     "installSkills": "Install Skills",
@@ -923,5 +924,11 @@
     "importConfirm": "Import ({{count}})",
     "importSuccess": "Imported {{count}} asset(s)",
     "importErrors": "{{count}} import(s) failed"
+  },
+  "plugins": {
+    "emptyTitle": "No plugins installed",
+    "emptyHint": "Install plugins via the CLI to see them here.",
+    "blocked": "Blocked",
+    "noAssets": "No bundled assets"
   }
 }

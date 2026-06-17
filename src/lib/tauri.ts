@@ -53,7 +53,34 @@ export interface SkillTarget {
 
 // ── Assets ──
 
-export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule" | "workflow";
+export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule" | "workflow" | "plugin";
+
+// ── Plugins ──
+
+/** Mirrors BundledAssetDto from src-tauri/src/commands/plugins.rs */
+export interface BundledAsset {
+  /** One of "skill" | "agent" | "command" | "hook" | "mcp" */
+  asset_type: string;
+  /** Leaf name of the asset (directory name or mcp server key). */
+  name: string;
+  /** Absolute path on disk. */
+  path: string;
+}
+
+/** Mirrors PluginDto from src-tauri/src/commands/plugins.rs */
+export interface Plugin {
+  /** "name@marketplace" canonical id. */
+  id: string;
+  name: string;
+  marketplace: string;
+  version: string;
+  install_path: string;
+  description: string | null;
+  /** Source URL or repo string resolved from known_marketplaces.json. */
+  source: string | null;
+  blocked: boolean;
+  assets: BundledAsset[];
+}
 
 /** Mirrors ManagedAssetDto from src-tauri/src/commands/assets.rs */
 export interface ManagedAsset {
@@ -728,6 +755,9 @@ export const updateGlobalLocalSkillFromCenter = (agent: string, skillRelativePat
 
 export const deleteGlobalLocalSkill = (agent: string, skillRelativePath: string) =>
   invoke<void>("delete_global_local_skill", { agent, skillRelativePath });
+
+export const listInstalledPlugins = () =>
+  invoke<Plugin[]>("list_installed_plugins");
 
 // ── Multi-asset commands ──
 
