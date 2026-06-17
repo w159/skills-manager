@@ -23,6 +23,7 @@ pub enum AssetType {
     Hook,
     Script,
     Rule,
+    Workflow,
 }
 
 impl AssetType {
@@ -34,6 +35,7 @@ impl AssetType {
             AssetType::Hook => "hook",
             AssetType::Script => "script",
             AssetType::Rule => "rule",
+            AssetType::Workflow => "workflow",
         }
     }
 
@@ -46,6 +48,7 @@ impl AssetType {
             "hook" => AssetType::Hook,
             "script" => AssetType::Script,
             "rule" => AssetType::Rule,
+            "workflow" => AssetType::Workflow,
             _ => AssetType::Skill,
         }
     }

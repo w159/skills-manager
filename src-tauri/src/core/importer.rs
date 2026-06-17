@@ -173,6 +173,25 @@ pub fn list_candidates(workspace_root: &Path) -> Result<Vec<ImportCandidate>> {
         },
     );
 
+    // ── workflows/ ──
+    scan_md_files(
+        workspace_root,
+        "workflows",
+        "workflow",
+        &mut candidates,
+        |stem, path| ImportCandidate {
+            asset_type: "workflow".to_string(),
+            id_or_name: stem.to_string(),
+            source_path: path,
+            in_active_set: false,
+            display_name: None,
+            description: None,
+            tools: None,
+            codex_sandbox_mode: None,
+            codex_reasoning_effort: None,
+        },
+    );
+
     // ── skills/ ──
     let skills_dir = workspace_root.join("skills");
     if skills_dir.exists() {
@@ -506,6 +525,11 @@ mod tests {
         fs::create_dir_all(root.join("rules")).unwrap();
         fs::write(root.join("rules/security.md"), "# Security\n\nSecurity rules.\n").unwrap();
 
+        // workflows/onboard.md + a .toml artifact that must be filtered out
+        fs::create_dir_all(root.join("workflows")).unwrap();
+        fs::write(root.join("workflows/onboard.md"), "# Onboard\n\nOnboarding workflow.\n").unwrap();
+        fs::write(root.join("workflows/onboard.toml"), "[workflow]\nname = \"onboard\"\n").unwrap();
+
         // skills/foo/SKILL.md
         fs::create_dir_all(root.join("skills/foo")).unwrap();
         fs::write(root.join("skills/foo/SKILL.md"), "---\nname: foo\n---\n# Foo skill\n").unwrap();
@@ -616,6 +640,20 @@ mod tests {
             .expect("security rule not found");
         assert_eq!(rule.asset_type, "rule");
         assert!(!rule.in_active_set);
+
+        // workflow onboard.md -> "onboard" candidate; onboard.toml must be filtered
+        let wf = candidates
+            .iter()
+            .find(|c| c.id_or_name == "onboard" && c.asset_type == "workflow")
+            .expect("onboard workflow not found");
+        assert_eq!(wf.asset_type, "workflow");
+        assert!(!wf.in_active_set);
+        // .toml artifact must not appear as a workflow candidate
+        assert_eq!(
+            candidates.iter().filter(|c| c.asset_type == "workflow").count(),
+            1,
+            "exactly one workflow candidate (onboard.md); toml artifact must be filtered"
+        );
 
         // skill foo
         let foo = candidates
@@ -843,5 +881,73 @@ mod tests {
             "dir without SKILL.md must be excluded; got: {:?}",
             skill_names
         );
+    }
+
+    // ── Workflow-specific tests ────────────────────────────────────────────────
+
+    #[test]
+    fn workflow_round_trip_from_str_and_as_str() {
+        use crate::core::skill_store::AssetType;
+        assert_eq!(AssetType::from_str("workflow"), AssetType::Workflow);
+        assert_eq!(AssetType::Workflow.as_str(), "workflow");
+    }
+
+    /// workflows/ scan yields "onboard" but not the .toml artifact.
+    #[test]
+    fn list_candidates_discovers_workflow_and_filters_toml_artifact() {
+        let workspace = make_fixture_workspace();
+        let candidates = list_candidates(workspace.path()).unwrap();
+
+        let wf_names: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.asset_type == "workflow")
+            .map(|c| c.id_or_name.as_str())
+            .collect();
+
+        assert!(
+            wf_names.contains(&"onboard"),
+            "onboard workflow must be discovered; got: {:?}",
+            wf_names
+        );
+        assert_eq!(
+            wf_names.len(),
+            1,
+            "exactly one workflow candidate expected (.toml must be filtered); got: {:?}",
+            wf_names
+        );
+    }
+
+    /// Importing a workflow candidate copies the file into the central repo.
+    #[test]
+    fn import_workflow_copies_file_to_central_repo() {
+        let workspace = make_fixture_workspace();
+        let env = make_test_env();
+
+        let candidates = list_candidates(workspace.path()).unwrap();
+        let results = import_candidates(&candidates, &env.store).unwrap();
+
+        let wf_result = results
+            .iter()
+            .find(|r| r.id_or_name == "onboard" && r.asset_type == "workflow")
+            .expect("onboard workflow must appear in import results");
+
+        assert!(
+            wf_result.central_path.exists(),
+            "central path for workflow must exist: {}",
+            wf_result.central_path.display()
+        );
+
+        // Verify it landed in the workflows/ subdir of the central repo.
+        let expected_dir = central_repo::asset_type_dir(crate::core::skill_store::AssetType::Workflow);
+        assert_eq!(
+            wf_result.central_path.parent().unwrap(),
+            expected_dir,
+            "workflow file must be inside the workflows/ central subdir"
+        );
+
+        // Store must have a row for it.
+        let rows = env.store.get_skills_by_asset_type(crate::core::skill_store::AssetType::Workflow).unwrap();
+        assert_eq!(rows.len(), 1, "exactly one workflow row must be in the store");
+        assert_eq!(rows[0].name, "onboard");
     }
 }

@@ -12,6 +12,7 @@
     "hooks": "钩子",
     "scripts": "脚本",
     "rules": "规则",
+    "workflows": "工作流",
     "globalWorkspace": "全局工作区",
     "lobsterAgents": "龙虾 Agent",
     "installSkills": "安装 Skills",

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import {
-  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen,
+  Layers, Bot, Terminal, Anchor, FileCode2, BookOpen, GitBranch,
   Loader2, AlertCircle, RefreshCw, Trash2, FolderOpen, X,
 } from "lucide-react";
 import { cn } from "../utils";
@@ -23,12 +23,13 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { type: "skill",   label: "Skills",   icon: Layers     },
-  { type: "agent",   label: "Agents",   icon: Bot        },
-  { type: "command", label: "Commands", icon: Terminal   },
-  { type: "hook",    label: "Hooks",    icon: Anchor     },
-  { type: "script",  label: "Scripts",  icon: FileCode2  },
-  { type: "rule",    label: "Rules",    icon: BookOpen   },
+  { type: "skill",    label: "Skills",    icon: Layers     },
+  { type: "agent",    label: "Agents",    icon: Bot        },
+  { type: "command",  label: "Commands",  icon: Terminal   },
+  { type: "hook",     label: "Hooks",     icon: Anchor     },
+  { type: "script",   label: "Scripts",   icon: FileCode2  },
+  { type: "rule",     label: "Rules",     icon: BookOpen   },
+  { type: "workflow", label: "Workflows", icon: GitBranch  },
 ];
 
 const VALID_TYPES = new Set<string>(TABS.map((t) => t.type));

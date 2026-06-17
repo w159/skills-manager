@@ -225,6 +225,12 @@ impl ToolAdapter {
                     filename_rule: None,
                     renderer: None,
                 }),
+                AssetType::Workflow => Some(AssetCapability {
+                    target_subdir: "workflows",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -262,6 +268,12 @@ impl ToolAdapter {
                     filename_rule: None,
                     renderer: None,
                 }),
+                AssetType::Workflow => Some(AssetCapability {
+                    target_subdir: "workflows",
+                    mode: SyncMode::Place,
+                    filename_rule: None,
+                    renderer: None,
+                }),
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -281,8 +293,8 @@ impl ToolAdapter {
                     filename_rule: Some("{name}.md"),
                     renderer: None,
                 }),
-                // Hook, Script, Rule: unsupported for Codex
-                AssetType::Hook | AssetType::Script | AssetType::Rule => None,
+                // Hook, Script, Rule, Workflow: unsupported for Codex
+                AssetType::Hook | AssetType::Script | AssetType::Rule | AssetType::Workflow => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -296,11 +308,12 @@ impl ToolAdapter {
                     filename_rule: Some("{id}.agent.md"),
                     renderer: Some(Renderer::Copilot),
                 }),
-                // Command, Hook, Script, Rule: unsupported for Copilot
+                // Command, Hook, Script, Rule, Workflow: unsupported for Copilot
                 AssetType::Command
                 | AssetType::Hook
                 | AssetType::Script
-                | AssetType::Rule => None,
+                | AssetType::Rule
+                | AssetType::Workflow => None,
                 AssetType::Skill => unreachable!("guarded above"),
             },
 
@@ -1166,6 +1179,15 @@ mod tests {
                 renderer: None,
             })
         );
+        assert_eq!(
+            a.asset_capability(AssetType::Workflow),
+            Some(AssetCapability {
+                target_subdir: "workflows",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
     }
 
     #[test]
@@ -1217,6 +1239,15 @@ mod tests {
                 renderer: None,
             })
         );
+        assert_eq!(
+            a.asset_capability(AssetType::Workflow),
+            Some(AssetCapability {
+                target_subdir: "workflows",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            })
+        );
     }
 
     #[test]
@@ -1244,6 +1275,7 @@ mod tests {
         assert!(a.asset_capability(AssetType::Hook).is_none());
         assert!(a.asset_capability(AssetType::Script).is_none());
         assert!(a.asset_capability(AssetType::Rule).is_none());
+        assert!(a.asset_capability(AssetType::Workflow).is_none());
     }
 
     #[test]
@@ -1263,6 +1295,7 @@ mod tests {
         assert!(a.asset_capability(AssetType::Hook).is_none());
         assert!(a.asset_capability(AssetType::Script).is_none());
         assert!(a.asset_capability(AssetType::Rule).is_none());
+        assert!(a.asset_capability(AssetType::Workflow).is_none());
     }
 
     #[test]
@@ -1277,6 +1310,7 @@ mod tests {
             AssetType::Hook,
             AssetType::Script,
             AssetType::Rule,
+            AssetType::Workflow,
         ] {
             assert!(
                 a.asset_capability(t).is_none(),
@@ -1286,5 +1320,41 @@ mod tests {
         }
         // Skill is also None (existing path unchanged).
         assert!(a.asset_capability(AssetType::Skill).is_none());
+    }
+
+    #[test]
+    fn asset_capability_workflow_place_for_claude_and_pi_none_for_codex_and_copilot() {
+        // Claude Code: Place into workflows/
+        assert_eq!(
+            find("claude_code").asset_capability(AssetType::Workflow),
+            Some(AssetCapability {
+                target_subdir: "workflows",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            }),
+            "claude_code must Place workflows"
+        );
+        // Pi: Place into workflows/
+        assert_eq!(
+            find("pi").asset_capability(AssetType::Workflow),
+            Some(AssetCapability {
+                target_subdir: "workflows",
+                mode: SyncMode::Place,
+                filename_rule: None,
+                renderer: None,
+            }),
+            "pi must Place workflows"
+        );
+        // Codex: unsupported
+        assert!(
+            find("codex").asset_capability(AssetType::Workflow).is_none(),
+            "codex must return None for Workflow"
+        );
+        // GitHub Copilot: unsupported
+        assert!(
+            find("github_copilot").asset_capability(AssetType::Workflow).is_none(),
+            "github_copilot must return None for Workflow"
+        );
     }
 }

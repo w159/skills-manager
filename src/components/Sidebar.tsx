@@ -9,6 +9,7 @@ import {
   Anchor,
   FileCode2,
   BookOpen,
+  GitBranch,
   Globe,
   Download,
   Settings,
@@ -81,12 +82,13 @@ export function Sidebar() {
 
   // Data-driven Library entries. Adding a new asset type = one new object here.
   const LIBRARY_ITEMS = [
-    { type: "skill",   label: t("sidebar.skills"),   icon: Layers    },
-    { type: "agent",   label: t("sidebar.agents"),   icon: Bot       },
-    { type: "command", label: t("sidebar.commands"), icon: Terminal  },
-    { type: "hook",    label: t("sidebar.hooks"),    icon: Anchor    },
-    { type: "script",  label: t("sidebar.scripts"),  icon: FileCode2 },
-    { type: "rule",    label: t("sidebar.rules"),    icon: BookOpen  },
+    { type: "skill",     label: t("sidebar.skills"),     icon: Layers     },
+    { type: "agent",     label: t("sidebar.agents"),     icon: Bot        },
+    { type: "command",   label: t("sidebar.commands"),   icon: Terminal   },
+    { type: "hook",      label: t("sidebar.hooks"),      icon: Anchor     },
+    { type: "script",    label: t("sidebar.scripts"),    icon: FileCode2  },
+    { type: "rule",      label: t("sidebar.rules"),      icon: BookOpen   },
+    { type: "workflow",  label: t("sidebar.workflows"),  icon: GitBranch  },
   ] as const;
 
   const globalSkillsByAgent = useMemo(() => {

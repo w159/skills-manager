@@ -53,7 +53,7 @@ export interface SkillTarget {
 
 // ── Assets ──
 
-export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule";
+export type AssetType = "skill" | "agent" | "command" | "hook" | "script" | "rule" | "workflow";
 
 /** Mirrors ManagedAssetDto from src-tauri/src/commands/assets.rs */
 export interface ManagedAsset {

@@ -164,6 +164,7 @@ pub fn asset_type_dir(asset_type: AssetType) -> PathBuf {
         AssetType::Hook => base_dir().join("hooks"),
         AssetType::Script => base_dir().join("scripts"),
         AssetType::Rule => base_dir().join("rules"),
+        AssetType::Workflow => base_dir().join("workflows"),
     }
 }
 
@@ -388,6 +389,7 @@ pub fn ensure_central_repo() -> Result<()> {
         asset_type_dir(AssetType::Hook),
         asset_type_dir(AssetType::Script),
         asset_type_dir(AssetType::Rule),
+        asset_type_dir(AssetType::Workflow),
     ];
     for d in &dirs {
         fs::create_dir_all(d)?;
@@ -506,6 +508,7 @@ mod tests {
         assert_eq!(asset_type_dir(AssetType::Hook), tmp.join("hooks"));
         assert_eq!(asset_type_dir(AssetType::Script), tmp.join("scripts"));
         assert_eq!(asset_type_dir(AssetType::Rule), tmp.join("rules"));
+        assert_eq!(asset_type_dir(AssetType::Workflow), tmp.join("workflows"));
 
         set_test_base_dir_override(None);
     }
@@ -559,6 +562,7 @@ mod tests {
             ("hooks", tmp.join("hooks")),
             ("scripts", tmp.join("scripts")),
             ("rules", tmp.join("rules")),
+            ("workflows", tmp.join("workflows")),
         ] {
             assert!(
                 path.is_dir(),
@@ -571,6 +575,17 @@ mod tests {
         assert!(tmp.join("skills").is_dir(), "skills dir must still be created");
 
         let _ = std::fs::remove_dir_all(&tmp);
+        set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn asset_type_dir_workflow_maps_to_workflows_subdir() {
+        let _guard = test_base_dir_lock();
+        let tmp = std::env::temp_dir().join("skills-manager-workflow-dir-test");
+        set_test_base_dir_override(Some(tmp.clone()));
+
+        assert_eq!(asset_type_dir(AssetType::Workflow), tmp.join("workflows"));
+
         set_test_base_dir_override(None);
     }
 }

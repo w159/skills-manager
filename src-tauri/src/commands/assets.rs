@@ -648,4 +648,62 @@ mod tests {
             err.message
         );
     }
+
+    /// Workflow assets are delivered (Place) by claude_code and pi; codex and
+    /// github_copilot must return "unsupported" and must not create any file.
+    #[cfg(unix)]
+    #[test]
+    fn workflow_placed_by_claude_and_pi_unsupported_by_codex_and_copilot() {
+        let env = make_test_env();
+
+        // Write a real .md file so the missing-file guard passes.
+        let wf_tmp = tempdir().unwrap();
+        let wf_file = wf_tmp.path().join("onboard.md");
+        fs::write(&wf_file, "# Onboard\n\nOnboarding workflow.\n").unwrap();
+
+        insert_record(
+            &env.store,
+            "wf1",
+            "onboard",
+            AssetType::Workflow,
+            wf_file.to_str().unwrap(),
+        );
+
+        let results = deliver_inner(&env.store, "wf1", &[]).unwrap();
+
+        // All four core adapters must be represented (none disabled).
+        assert_eq!(results.len(), 4, "all four core adapters must appear");
+
+        let outcome_for = |key: &str| {
+            results
+                .iter()
+                .find(|r| r.adapter_key == key)
+                .map(|r| r.outcome.as_str())
+                .unwrap_or("missing")
+        };
+
+        // claude_code and pi declare Workflow capability -> not "unsupported".
+        assert_ne!(
+            outcome_for("claude_code"),
+            "unsupported",
+            "claude_code must support Workflow assets"
+        );
+        assert_ne!(
+            outcome_for("pi"),
+            "unsupported",
+            "pi must support Workflow assets"
+        );
+
+        // codex and github_copilot return None for Workflow -> "unsupported".
+        assert_eq!(
+            outcome_for("codex"),
+            "unsupported",
+            "codex must NOT support Workflow assets"
+        );
+        assert_eq!(
+            outcome_for("github_copilot"),
+            "unsupported",
+            "github_copilot must NOT support Workflow assets"
+        );
+    }
 }
