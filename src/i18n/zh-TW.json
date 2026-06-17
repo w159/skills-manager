@@ -839,7 +839,9 @@
     "importActive": "活躍",
     "importConfirm": "匯入（{{count}}）",
     "importSuccess": "已匯入 {{count}} 個資產",
-    "importErrors": "{{count}} 個匯入失敗"
+    "importErrors": "{{count}} 個匯入失敗",
+    "fromPlugin": "來自 {{name}}",
+    "showPluginOwned": "顯示插件資產"
   },
   "plugins": {
     "emptyTitle": "尚未安裝任何插件",

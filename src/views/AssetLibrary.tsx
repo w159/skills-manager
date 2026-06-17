@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -132,6 +132,9 @@ function AssetRow({ asset, onRemoved }: AssetRowProps) {
     }
   };
 
+  // Derive the short display name from the plugin id: "my-plugin@market" -> "my-plugin"
+  const pluginDisplayName = asset.owning_plugin?.split("@")[0] ?? null;
+
   return (
     <div className="flex items-center gap-3 rounded-[6px] border border-border-subtle bg-surface px-3.5 py-3 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -140,6 +143,14 @@ function AssetRow({ asset, onRemoved }: AssetRowProps) {
           <span className="truncate text-[12px] text-muted">{asset.description}</span>
         )}
       </div>
+      {pluginDisplayName && (
+        <span
+          className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+          title={asset.owning_plugin ?? undefined}
+        >
+          {t("library.fromPlugin", { name: pluginDisplayName })}
+        </span>
+      )}
       <span
         className={cn(
           "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -470,6 +481,8 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // Filter: when false, rows with owning_plugin are hidden.
+  const [showPluginOwned, setShowPluginOwned] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -489,6 +502,15 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
   }, [load]);
 
   const handleImported = useCallback(() => { void load(); }, [load]);
+
+  // Whether any asset in this list carries plugin attribution.
+  const hasPluginOwned = useMemo(() => assets.some((a) => a.owning_plugin != null), [assets]);
+
+  // Apply the filter only when the toggle is off.
+  const visibleAssets = useMemo(
+    () => (showPluginOwned ? assets : assets.filter((a) => a.owning_plugin == null)),
+    [assets, showPluginOwned]
+  );
 
   if (loading) {
     return (
@@ -515,19 +537,32 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
 
   return (
     <>
-      {/* Import button always visible above the list (empty or not) */}
-      <div className="mb-3 flex justify-end">
-        <button
-          type="button"
-          onClick={() => setImportOpen(true)}
-          className="app-button app-button-secondary flex items-center gap-1.5 text-sm"
-        >
-          <FolderOpen className="h-3.5 w-3.5" />
-          {t("library.importFromWorkspace")}
-        </button>
+      {/* Toolbar: import button + optional plugin-owned toggle */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        {hasPluginOwned && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-muted select-none">
+            <input
+              type="checkbox"
+              className="h-3 w-3 accent-primary"
+              checked={showPluginOwned}
+              onChange={(e) => setShowPluginOwned(e.target.checked)}
+            />
+            {t("library.showPluginOwned")}
+          </label>
+        )}
+        <div className="ml-auto">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="app-button app-button-secondary flex items-center gap-1.5 text-sm"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            {t("library.importFromWorkspace")}
+          </button>
+        </div>
       </div>
 
-      {assets.length === 0 ? (
+      {visibleAssets.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
           <p className="text-sm font-medium text-secondary">
             {t("library.emptyTitle", { type: assetType })}
@@ -536,7 +571,7 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {assets.map((asset) => (
+          {visibleAssets.map((asset) => (
             <AssetRow key={asset.id} asset={asset} onRemoved={() => void load()} />
           ))}
         </div>

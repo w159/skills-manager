@@ -923,7 +923,9 @@
     "importActive": "active",
     "importConfirm": "Import ({{count}})",
     "importSuccess": "Imported {{count}} asset(s)",
-    "importErrors": "{{count}} import(s) failed"
+    "importErrors": "{{count}} import(s) failed",
+    "fromPlugin": "from {{name}}",
+    "showPluginOwned": "Show plugin-owned"
   },
   "plugins": {
     "emptyTitle": "No plugins installed",

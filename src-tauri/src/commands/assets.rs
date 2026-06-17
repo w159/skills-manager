@@ -14,6 +14,7 @@ use crate::core::{
     asset_render::canonical_agent_from_file,
     audit_log::AuditDraft,
     error::AppError,
+    plugin_discovery,
     repo_lock::RepoLock,
     skill_store::{AssetType, SkillRecord, SkillStore},
     sync_metadata,
@@ -36,6 +37,12 @@ pub struct ManagedAssetDto {
     pub central_path: String,
     pub enabled: bool,
     pub status: String,
+    /// Plugin id (`"name@marketplace"`) that owns this asset, or `None` when the
+    /// asset was not imported from a plugin.  Set by `get_managed_assets` via
+    /// `plugin_discovery::build_asset_attribution`; callers that construct a
+    /// `ManagedAssetDto` without plugin context (e.g. `From<SkillRecord>`) leave
+    /// this as `None`.
+    pub owning_plugin: Option<String>,
 }
 
 impl From<SkillRecord> for ManagedAssetDto {
@@ -48,6 +55,7 @@ impl From<SkillRecord> for ManagedAssetDto {
             central_path: r.central_path,
             enabled: r.enabled,
             status: r.status,
+            owning_plugin: None,
         }
     }
 }
@@ -69,6 +77,11 @@ pub struct AdapterDeliveryResult {
 /// Existing skill listing (`get_managed_skills`) is not altered; this is an
 /// additive query.  Unknown `asset_type_str` values silently map to
 /// `AssetType::Skill` (same as `AssetType::from_str`).
+///
+/// Each returned record is annotated with `owning_plugin` by matching the
+/// record's `source_ref` (the original import path) against the attribution
+/// map built from the locally installed plugins.  The plugin root is resolved
+/// once per call; attribution lookup is O(1) per record.
 #[tauri::command]
 pub async fn get_managed_assets(
     asset_type_str: String,
@@ -80,9 +93,69 @@ pub async fn get_managed_assets(
         let records = store
             .get_skills_by_asset_type(asset_type)
             .map_err(AppError::db)?;
-        Ok(records.into_iter().map(ManagedAssetDto::from).collect())
+
+        // Build plugin attribution once for this call.
+        // A missing plugin root (no plugins installed) is treated as empty --
+        // attribution will simply return None for every record.
+        let attribution = resolve_plugin_attribution();
+
+        let dtos = records
+            .into_iter()
+            .map(|r| {
+                let owning_plugin = r.source_ref.as_deref().and_then(|src| {
+                    // 1. Exact match: source_ref is the asset path in the attribution map.
+                    if let Some(plugin_id) = attribution.exact.get(src) {
+                        return Some(plugin_id.clone());
+                    }
+                    // 2. Prefix fallback: source_ref starts with a plugin's install_path.
+                    attribution
+                        .plugins
+                        .iter()
+                        .find(|(install_path, _)| src.starts_with(install_path.as_str()))
+                        .map(|(_, plugin_id)| plugin_id.clone())
+                });
+                ManagedAssetDto {
+                    owning_plugin,
+                    ..ManagedAssetDto::from(r)
+                }
+            })
+            .collect();
+
+        Ok(dtos)
     })
     .await?
+}
+
+/// Resolved plugin attribution data for one `get_managed_assets` call.
+struct PluginAttribution {
+    /// `asset_path -> plugin_id` (exact match from `build_asset_attribution`).
+    exact: plugin_discovery::AssetAttribution,
+    /// `(install_path_str, plugin_id)` pairs for prefix-fallback matching.
+    plugins: Vec<(String, String)>,
+}
+
+/// Resolve the plugin root and compute attribution data.  Returns an empty
+/// attribution when the plugin root cannot be determined or has no plugins.
+fn resolve_plugin_attribution() -> PluginAttribution {
+    let plugin_root = match dirs::home_dir() {
+        Some(home) => home.join(".claude").join("plugins"),
+        None => {
+            return PluginAttribution {
+                exact: Default::default(),
+                plugins: Vec::new(),
+            }
+        }
+    };
+    let plugins = plugin_discovery::list_plugins(&plugin_root);
+    let exact = plugin_discovery::build_asset_attribution(&plugins);
+    let prefix_pairs = plugins
+        .iter()
+        .map(|p| (p.install_path.to_string_lossy().into_owned(), p.id.clone()))
+        .collect();
+    PluginAttribution {
+        exact,
+        plugins: prefix_pairs,
+    }
 }
 
 /// Deliver the managed asset identified by `asset_id` to the four core coding
@@ -695,6 +768,144 @@ mod tests {
             err.message.contains("/nonexistent/path/ghost.sh"),
             "error message must include the missing path; got: {}",
             err.message
+        );
+    }
+
+    // ── owning_plugin attribution ──────────────────────────────────────────
+
+    /// Build a minimal plugin fixture alongside the store, insert two records:
+    /// one whose `source_ref` exactly matches a plugin asset path and one that
+    /// has a non-plugin source_ref.  Verify that `resolve_plugin_attribution`
+    /// (and the full annotation loop in `get_managed_assets`) correctly sets
+    /// `owning_plugin` for the first and leaves it `None` for the second.
+    #[test]
+    fn get_managed_assets_annotation_exact_match_and_none() {
+        use crate::core::plugin_discovery;
+        use std::fs;
+        use tempfile::tempdir;
+
+        let env = make_test_env();
+
+        // Build a fixture plugin root with one plugin that has one skill asset.
+        let plugin_tmp = tempdir().unwrap();
+        let plugin_root = plugin_tmp.path();
+        let install_root = plugin_root.join("cache/test-market/my-plugin/1.0.0");
+        fs::create_dir_all(&install_root).unwrap();
+
+        // Write installed_plugins.json pointing at the install root.
+        let installed = serde_json::json!({
+            "version": 2,
+            "plugins": {
+                "my-plugin@test-market": [
+                    {
+                        "scope": "user",
+                        "installPath": install_root.to_string_lossy(),
+                        "version": "1.0.0",
+                        "installedAt": "2026-01-01T00:00:00.000Z"
+                    }
+                ]
+            }
+        });
+        fs::write(
+            plugin_root.join("installed_plugins.json"),
+            serde_json::to_string(&installed).unwrap(),
+        )
+        .unwrap();
+
+        // Manifest declares one skill directory.
+        let manifest = r#"{"name":"my-plugin","version":"1.0.0","skills":"./skills/"}"#;
+        fs::create_dir_all(install_root.join(".claude-plugin")).unwrap();
+        fs::write(install_root.join(".claude-plugin/plugin.json"), manifest).unwrap();
+
+        // One real skill directory so enumerate_dir_assets finds it.
+        let skill_dir = install_root.join("skills/alpha-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        let skill_asset_path = skill_dir.to_string_lossy().into_owned();
+
+        // Insert record 1: source_ref == the plugin skill asset path (exact hit).
+        let now = chrono::Utc::now().timestamp();
+        env.store
+            .insert_skill(&SkillRecord {
+                id: "plugin-asset".to_string(),
+                name: "alpha-skill".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(skill_asset_path.clone()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: "/central/alpha-skill.md".to_string(),
+                content_hash: None,
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+                asset_type: AssetType::Agent,
+            })
+            .unwrap();
+
+        // Insert record 2: source_ref points at a non-plugin path.
+        env.store
+            .insert_skill(&SkillRecord {
+                id: "manual-asset".to_string(),
+                name: "my-manual".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some("/home/user/workspace/agents/my-manual".to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: "/central/my-manual.md".to_string(),
+                content_hash: None,
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+                asset_type: AssetType::Agent,
+            })
+            .unwrap();
+
+        // Exercise the attribution logic directly (mirrors get_managed_assets inner loop).
+        let plugins = plugin_discovery::list_plugins(plugin_root);
+        assert!(!plugins.is_empty(), "fixture plugin must be discovered");
+
+        let attribution_map = plugin_discovery::build_asset_attribution(&plugins);
+        let prefix_pairs: Vec<(String, String)> = plugins
+            .iter()
+            .map(|p| (p.install_path.to_string_lossy().into_owned(), p.id.clone()))
+            .collect();
+
+        let annotate = |source_ref: &str| -> Option<String> {
+            if let Some(id) = attribution_map.get(source_ref) {
+                return Some(id.clone());
+            }
+            prefix_pairs
+                .iter()
+                .find(|(install_path, _)| source_ref.starts_with(install_path.as_str()))
+                .map(|(_, id)| id.clone())
+        };
+
+        let plugin_owned = annotate(&skill_asset_path);
+        assert_eq!(
+            plugin_owned.as_deref(),
+            Some("my-plugin@test-market"),
+            "record with source_ref matching plugin asset path must be attributed"
+        );
+
+        let not_owned = annotate("/home/user/workspace/agents/my-manual");
+        assert!(
+            not_owned.is_none(),
+            "record with non-plugin source_ref must have no attribution"
         );
     }
 

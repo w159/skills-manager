@@ -923,7 +923,9 @@
     "importActive": "活跃",
     "importConfirm": "导入（{{count}}）",
     "importSuccess": "已导入 {{count}} 个资产",
-    "importErrors": "{{count}} 个导入失败"
+    "importErrors": "{{count}} 个导入失败",
+    "fromPlugin": "来自 {{name}}",
+    "showPluginOwned": "显示插件资产"
   },
   "plugins": {
     "emptyTitle": "未安装任何插件",

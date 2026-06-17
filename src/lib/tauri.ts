@@ -91,6 +91,8 @@ export interface ManagedAsset {
   central_path: string;
   enabled: boolean;
   status: string;
+  /** Plugin id ("name@marketplace") that owns this asset, or null when not plugin-sourced. */
+  owning_plugin: string | null;
 }
 
 /** Backward-compatible alias so callers that expect ManagedSkill still type-check. */
