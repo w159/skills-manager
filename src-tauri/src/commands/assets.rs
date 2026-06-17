@@ -156,6 +156,7 @@ pub async fn deliver_managed_asset(
                 DeliveryOutcome::Rendered(p) => ("rendered".to_string(), Some(p.to_string_lossy().to_string())),
                 DeliveryOutcome::RenderedUpToDate(p) => ("rendered_up_to_date".to_string(), Some(p.to_string_lossy().to_string())),
                 DeliveryOutcome::Placed(p) => ("placed".to_string(), Some(p.to_string_lossy().to_string())),
+                DeliveryOutcome::ForeignHome(p) => ("skipped_foreign_home".to_string(), Some(p.to_string_lossy().to_string())),
                 DeliveryOutcome::DeferToSkillPath => ("defer_to_skill_path".to_string(), None),
                 DeliveryOutcome::Unsupported => ("unsupported".to_string(), None),
             };
@@ -494,6 +495,10 @@ mod tests {
                 DeliveryOutcome::Placed(p) => {
                     ("placed".to_string(), Some(p.to_string_lossy().to_string()))
                 }
+                DeliveryOutcome::ForeignHome(p) => (
+                    "skipped_foreign_home".to_string(),
+                    Some(p.to_string_lossy().to_string()),
+                ),
                 DeliveryOutcome::DeferToSkillPath => ("defer_to_skill_path".to_string(), None),
                 DeliveryOutcome::Unsupported => ("unsupported".to_string(), None),
             };

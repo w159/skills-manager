@@ -10,6 +10,32 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+// ---------------------------------------------------------------------------
+// Internal path-safety helpers
+// ---------------------------------------------------------------------------
+
+/// Return `true` when `path` (resolving symlinks) is strictly inside `root`
+/// (resolving symlinks).  Returns `false` on any canonicalization error.
+fn resolves_inside(path: &Path, root: &Path) -> bool {
+    match (std::fs::canonicalize(path), std::fs::canonicalize(root)) {
+        (Ok(p), Ok(r)) => p.starts_with(&r),
+        _ => false,
+    }
+}
+
+/// Return `true` when `target` is a symlink whose resolved destination lies
+/// anywhere inside `central_root` (the skills-manager central repo root as
+/// resolved by `central_repo::base_dir()`).  This lets `backup_foreign_target`
+/// recognise a link placed by a previous sync cycle as "already managed" even
+/// though it does not point at the exact same source file (e.g. a different
+/// release of the same asset).
+fn symlink_resolves_to_central_repo(target: &Path, central_root: &Path) -> bool {
+    if !target.is_symlink() {
+        return false;
+    }
+    resolves_inside(target, central_root)
+}
+
 use crate::core::asset_render::{render_codex, render_copilot, CanonicalAgent};
 use crate::core::tool_adapters::Renderer;
 use crate::core::skill_store::AssetType;
@@ -25,7 +51,10 @@ use crate::core::tool_adapters::ToolAdapter;
 /// consistent with `git_backup.rs`) and return the backup path.
 ///
 /// "Already ours" means:
-/// - Symlink/Place: the target is a symlink that resolves to `source`.
+/// - Symlink/Place: the target is a symlink that resolves to `source`, OR the
+///   target is a symlink that resolves anywhere inside `central_root` (the
+///   central repo root returned by `central_repo::base_dir()`, i.e.
+///   `~/.skills-manager` by default — a link created by a previous sync cycle).
 /// - Render: the target is a regular file whose content equals `render_bytes`.
 ///
 /// If the target does not exist, or is already ours, returns `None` (no backup
@@ -36,6 +65,7 @@ fn backup_foreign_target(
     source: &Path,
     mode: SyncMode,
     render_bytes: Option<&[u8]>,
+    central_root: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     // Does the target exist at all (follow through: check lstat)?
     if std::fs::symlink_metadata(target).is_err() {
@@ -45,7 +75,15 @@ fn backup_foreign_target(
 
     // Is this already our managed artifact?
     let already_ours = match mode {
-        SyncMode::Symlink | SyncMode::Place => symlink_points_to_source(target, source),
+        SyncMode::Symlink | SyncMode::Place => {
+            // Exact match: symlink resolves to this specific source file.
+            symlink_points_to_source(target, source)
+                // Broad match: symlink resolves anywhere inside the central
+                // repo — a link written by a prior sync cycle.
+                || central_root
+                    .map(|root| symlink_resolves_to_central_repo(target, root))
+                    .unwrap_or(false)
+        }
         SyncMode::Render => {
             if let Some(bytes) = render_bytes {
                 match std::fs::read(target) {
@@ -105,6 +143,11 @@ pub enum DeliveryOutcome {
     RenderedUpToDate(PathBuf),
     /// A Place symlink was created at `path`.
     Placed(PathBuf),
+    /// The agent home (or a subdirectory within it) resolves via symlink to a
+    /// location outside the nominal home root.  Delivery was refused and
+    /// nothing was written.  The `PathBuf` carries the resolved foreign path
+    /// that triggered the refusal.
+    ForeignHome(PathBuf),
     /// The asset type is `Skill`; the caller should use the existing skill
     /// delivery path (scenario_service / sync_engine).
     DeferToSkillPath,
@@ -151,6 +194,14 @@ pub struct AssetInput<'a> {
 /// | None + Skill    | return `DeferToSkillPath`                                |
 /// | None + other    | return `Unsupported`                                     |
 ///
+/// # Safety guard
+///
+/// If the resolved `home` (following any symlink) lies outside the nominal
+/// `home` path, delivery is refused and `ForeignHome` is returned.  This
+/// prevents writes from escaping into a foreign repository when the agent
+/// home directory (or a subdirectory inside it) is itself a symlink into
+/// another git repo.
+///
 /// The function is additive — it does not touch existing skill delivery paths.
 pub fn deliver_asset(
     adapter: &ToolAdapter,
@@ -187,12 +238,36 @@ pub fn deliver_asset(
         ),
     };
 
+    // ── Foreign-home guard ────────────────────────────────────────────────────
+    // If `subdir` exists on disk and resolves (following symlinks) to a
+    // location outside `home`, refuse delivery.  This catches the case where
+    // ~/.codex/agents or ~/.copilot/agents is a symlink into another git repo.
+    if subdir.exists() && !resolves_inside(&subdir, home) {
+        // canonicalize gives us the true resolved path for the error message.
+        let resolved = std::fs::canonicalize(&subdir).unwrap_or_else(|_| subdir.clone());
+        return Ok(DeliveryOutcome::ForeignHome(resolved));
+    }
+
+    // Derive the central repo root via central_repo::base_dir(), which is the
+    // same source of truth used everywhere else in the codebase and honours the
+    // test-override set by set_test_base_dir_override.  This lets
+    // backup_foreign_target recognise any symlink resolving into the real
+    // central repo (~/.skills-manager by default) as "already managed".
+    let central_root: Option<PathBuf> =
+        Some(crate::core::central_repo::base_dir());
+
     match capability.mode {
         // ── Symlink ──────────────────────────────────────────────────────────
         SyncMode::Symlink => {
             std::fs::create_dir_all(&subdir)?;
             // Back up any pre-existing foreign file before symlinking.
-            backup_foreign_target(&target, asset.source, SyncMode::Symlink, None)?;
+            backup_foreign_target(
+                &target,
+                asset.source,
+                SyncMode::Symlink,
+                None,
+                central_root.as_deref(),
+            )?;
             sync_skill(asset.source, &target, SyncMode::Symlink)?;
             Ok(DeliveryOutcome::Symlinked(target))
         }
@@ -216,7 +291,13 @@ pub fn deliver_asset(
             std::fs::create_dir_all(&subdir)?;
             // Back up any pre-existing foreign file before writing.  Pass the
             // render bytes so the check can recognise our own prior output.
-            backup_foreign_target(&target, asset.source, SyncMode::Render, Some(&bytes))?;
+            backup_foreign_target(
+                &target,
+                asset.source,
+                SyncMode::Render,
+                Some(&bytes),
+                central_root.as_deref(),
+            )?;
             let (written, _hash) = write_rendered_file(&target, &bytes)?;
             if written {
                 Ok(DeliveryOutcome::Rendered(target))
@@ -229,7 +310,13 @@ pub fn deliver_asset(
         SyncMode::Place => {
             std::fs::create_dir_all(&subdir)?;
             // Back up any pre-existing foreign file/directory before placing.
-            backup_foreign_target(&target, asset.source, SyncMode::Place, None)?;
+            backup_foreign_target(
+                &target,
+                asset.source,
+                SyncMode::Place,
+                None,
+                central_root.as_deref(),
+            )?;
             sync_skill(asset.source, &target, SyncMode::Place)?;
             Ok(DeliveryOutcome::Placed(target))
         }
@@ -727,6 +814,151 @@ mod tests {
         assert_eq!(
             backup_content, b"PREEXISTING_TOML",
             "backup must contain the original file content"
+        );
+    }
+
+    // ── SAFETY GUARD: foreign home ────────────────────────────────────────────
+
+    /// When the target subdir is a symlink pointing OUTSIDE the nominal home
+    /// root, `deliver_asset` must return `ForeignHome` and write NOTHING to
+    /// the foreign location.
+    #[cfg(unix)]
+    #[test]
+    fn deliver_refuses_when_subdir_symlinks_outside_home() {
+        // The "home" directory for this adapter.
+        let home = tempdir().unwrap();
+        // A separate directory that lives OUTSIDE the home — simulates the
+        // user's agentic-tools source tree on iCloud.
+        let foreign_dir = tempdir().unwrap();
+        let foreign_agents = foreign_dir.path().join("agents");
+        fs::create_dir_all(&foreign_agents).unwrap();
+
+        // Plant a sentinel file in the foreign location so we can assert it is
+        // untouched after the refused delivery.
+        let sentinel = foreign_agents.join("sentinel.txt");
+        fs::write(&sentinel, b"DO NOT TOUCH").unwrap();
+
+        // Create <home>/agents as a symlink pointing into the foreign tree.
+        let home_agents = home.path().join("agents");
+        std::os::unix::fs::symlink(&foreign_agents, &home_agents).unwrap();
+
+        // Source file lives in a separate tempdir (central repo simulation).
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("backend-architect.md");
+        fs::write(&src, b"# Backend Architect").unwrap();
+
+        let agent = sample_agent();
+        let a = adapter("claude_code", home.path());
+        let input = AssetInput {
+            asset_type: AssetType::Agent,
+            source: &src,
+            id: "backend-architect",
+            name: "backend-architect",
+            canonical_agent: Some(&agent),
+        };
+
+        let result = deliver_asset(&a, home.path(), &input).unwrap();
+
+        // Must be refused with ForeignHome.
+        assert!(
+            matches!(result, DeliveryOutcome::ForeignHome(_)),
+            "expected ForeignHome, got {:?}",
+            result
+        );
+
+        // The foreign directory must be completely untouched.
+        let foreign_entry_count = fs::read_dir(&foreign_agents).unwrap().count();
+        assert_eq!(
+            foreign_entry_count, 1,
+            "foreign agents dir must still contain exactly the sentinel file, found {} entries",
+            foreign_entry_count
+        );
+        assert_eq!(
+            fs::read(&sentinel).unwrap(),
+            b"DO NOT TOUCH",
+            "sentinel file must be unmodified"
+        );
+    }
+
+    /// When the target is a symlink that resolves into the skills-manager
+    /// central repo root (as resolved by `central_repo::base_dir()`),
+    /// `deliver_asset` must NOT create a `.backup-*` file — no churn on
+    /// re-sync.  The test exercises the real runtime derivation by pointing the
+    /// base-dir override at a tempdir; no fake `src-tauri` marker is needed or
+    /// used.
+    #[cfg(unix)]
+    #[test]
+    fn no_backup_when_target_symlink_resolves_inside_central_repo() {
+        use crate::core::central_repo::{
+            set_test_base_dir_override, test_base_dir_lock,
+        };
+
+        // Hold the global base-dir mutex for the duration of the test.
+        let _guard = test_base_dir_lock();
+
+        // The tempdir is the central repo root for this test run.  No
+        // src-tauri marker is created — the real resolver does not look for
+        // one; only the old walk-up heuristic did.
+        let central = tempdir().unwrap();
+        set_test_base_dir_override(Some(central.path().to_path_buf()));
+
+        // Source file inside the central repo tree (as delivered by the real
+        // sync pipeline: central_repo::base_dir()/agents/backend-architect.md).
+        let agents_src_dir = central.path().join("agents");
+        fs::create_dir_all(&agents_src_dir).unwrap();
+        let src = agents_src_dir.join("backend-architect.md");
+        fs::write(&src, b"# Backend Architect").unwrap();
+
+        // A *different* file that also lives inside the central repo — this
+        // simulates an older release of the same asset left by a prior cycle.
+        let older = agents_src_dir.join("older-version.md");
+        fs::write(&older, b"# Older").unwrap();
+
+        // The "home" directory where the adapter delivers the asset.
+        let home = tempdir().unwrap();
+        let agents_home_dir = home.path().join("agents");
+        fs::create_dir_all(&agents_home_dir).unwrap();
+
+        // Pre-place a symlink at the expected target location pointing at the
+        // older file inside the central repo (not the current source file).
+        // deliver_asset must recognise this as "already managed" and skip the
+        // backup.
+        let target = agents_home_dir.join("backend-architect.md");
+        std::os::unix::fs::symlink(&older, &target).unwrap();
+
+        // Call deliver_asset — this exercises the real central_root derivation
+        // via central_repo::base_dir(), which picks up the override above.
+        let agent = sample_agent();
+        let a = adapter("claude_code", home.path());
+        let input = AssetInput {
+            asset_type: AssetType::Agent,
+            source: &src,
+            id: "backend-architect",
+            name: "backend-architect",
+            canonical_agent: Some(&agent),
+        };
+        let result = deliver_asset(&a, home.path(), &input).unwrap();
+
+        // Restore the override before any assertion that might panic.
+        set_test_base_dir_override(None);
+
+        // The delivery must succeed (Symlinked outcome).
+        assert!(
+            matches!(result, DeliveryOutcome::Symlinked(_)),
+            "expected Symlinked, got {:?}",
+            result
+        );
+
+        // No .backup-* file must exist: the pre-existing symlink pointed into
+        // the central repo and was therefore already managed.
+        let has_backup = fs::read_dir(&agents_home_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".backup-"));
+        assert!(
+            !has_backup,
+            "no .backup-* file must exist when the target symlink resolves \
+             inside the central repo root"
         );
     }
 }

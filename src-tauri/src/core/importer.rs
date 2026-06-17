@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use super::central_repo;
+use super::skill_metadata::is_valid_skill_dir;
 use super::skill_store::{AssetType, SkillRecord, SkillStore};
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -185,6 +186,13 @@ pub fn list_candidates(workspace_root: &Path) -> Result<Vec<ImportCandidate>> {
                     Some(n) => n.to_string(),
                     None => continue,
                 };
+                // Only treat a subdirectory as a skill candidate when it contains
+                // a recognised skill marker file (SKILL.md or skill.md).
+                // Without this gate every non-skill directory (.system, assets, ci,
+                // etc.) becomes a phantom skill candidate.
+                if !is_valid_skill_dir(&path) {
+                    continue;
+                }
                 let in_active = registry.skill_ids.contains(&dir_name);
                 candidates.push(ImportCandidate {
                     asset_type: "skill".to_string(),
@@ -313,12 +321,22 @@ fn scan_md_files<F>(
             Some(n) => n,
             None => continue,
         };
-        // Only .md files; skip .backup-* variants
-        if !file_name.ends_with(".md") || file_name.contains(".backup") {
+        // Only plain .md files; skip .backup-* render artifacts and .toml configs.
+        // Render artifacts like `foo.agent.md` have a dot before the final ".md"
+        // segment — the stem would contain a dot, producing phantom duplicates.
+        if !file_name.ends_with(".md")
+            || file_name.contains(".backup")
+            || file_name.ends_with(".toml")
+        {
             continue;
         }
         // stem: strip the final ".md" — owned so we can move path afterward
         let stem = file_name[..file_name.len() - 3].to_string();
+        // Skip render artifacts: stems that still contain a dot are compound
+        // extensions like `<name>.agent` produced by render pipelines.
+        if stem.contains('.') {
+            continue;
+        }
         candidates.push(make_candidate(&stem, path));
     }
 }
@@ -348,8 +366,13 @@ fn scan_flat_files(
             Some(n) => n,
             None => continue,
         };
-        // Skip dotfiles and __pycache__
-        if file_name.starts_with('.') || file_name == "__pycache__" {
+        // Skip dotfiles, __pycache__, and documentation/config files.
+        // Hooks and scripts are executable files; .md and .toml are never scripts.
+        if file_name.starts_with('.')
+            || file_name == "__pycache__"
+            || file_name.ends_with(".md")
+            || file_name.ends_with(".toml")
+        {
             continue;
         }
         candidates.push(ImportCandidate {
@@ -701,5 +724,124 @@ mod tests {
 
         let after = fs::read(&src_agent).unwrap();
         assert_eq!(before, after, "source file must not be modified by import");
+    }
+
+    // ── Pollution-filter tests ─────────────────────────────────────────────────
+
+    /// Render artifacts (.agent.md) and config files (.toml) must not appear as
+    /// agent candidates; only the canonical plain `<name>.md` source is discovered.
+    #[test]
+    fn scan_md_excludes_agent_render_artifacts_and_toml() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("agents")).unwrap();
+
+        // Canonical source — should be discovered
+        fs::write(root.join("agents/backend-architect.md"), "# Agent\n").unwrap();
+        // Render artifact — must be excluded
+        fs::write(
+            root.join("agents/backend-architect.agent.md"),
+            "# Render artifact\n",
+        )
+        .unwrap();
+        // Toml config — must be excluded
+        fs::write(root.join("agents/backend-architect.toml"), "[agent]\n").unwrap();
+
+        // No registry needed; list_candidates handles a missing registry gracefully.
+        let candidates = list_candidates(root).unwrap();
+        let agent_names: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.asset_type == "agent")
+            .map(|c| c.id_or_name.as_str())
+            .collect();
+
+        assert!(
+            agent_names.contains(&"backend-architect"),
+            "canonical agent must be present; got: {:?}",
+            agent_names
+        );
+        assert!(
+            !agent_names.contains(&"backend-architect.agent"),
+            "render artifact must be excluded; got: {:?}",
+            agent_names
+        );
+        assert!(
+            !agent_names
+                .iter()
+                .any(|n| n.ends_with(".toml") || n.contains("toml")),
+            "toml config must be excluded; got: {:?}",
+            agent_names
+        );
+    }
+
+    /// Documentation files (.md) inside hooks/ or scripts/ must not be imported
+    /// as hook/script candidates; only executable/script files are accepted.
+    #[test]
+    fn scan_flat_files_excludes_md_and_toml_docs() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("scripts")).unwrap();
+
+        // Real script — should be discovered
+        fs::write(root.join("scripts/deploy.sh"), "#!/bin/sh\n").unwrap();
+        // Documentation file — must be excluded
+        fs::write(root.join("scripts/README.md"), "# Scripts\n").unwrap();
+        // Toml config — must be excluded
+        fs::write(root.join("scripts/config.toml"), "[settings]\n").unwrap();
+
+        let candidates = list_candidates(root).unwrap();
+        let script_names: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.asset_type == "script")
+            .map(|c| c.id_or_name.as_str())
+            .collect();
+
+        assert!(
+            script_names.contains(&"deploy.sh"),
+            "real script must be present; got: {:?}",
+            script_names
+        );
+        assert!(
+            !script_names.contains(&"README.md"),
+            ".md doc must be excluded; got: {:?}",
+            script_names
+        );
+        assert!(
+            !script_names.contains(&"config.toml"),
+            ".toml config must be excluded; got: {:?}",
+            script_names
+        );
+    }
+
+    /// Skill candidate discovery must require a SKILL.md marker file.
+    /// Directories without SKILL.md (e.g. .system, assets, ci junk dirs) are excluded.
+    #[test]
+    fn skills_scan_requires_skill_md_marker() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("skills/real-skill")).unwrap();
+        fs::write(root.join("skills/real-skill/SKILL.md"), "# Real skill\n").unwrap();
+
+        // Junk directory with no marker — must be excluded
+        fs::create_dir_all(root.join("skills/junk-dir")).unwrap();
+        fs::write(root.join("skills/junk-dir/README.md"), "# Not a skill\n").unwrap();
+
+        let candidates = list_candidates(root).unwrap();
+        let skill_names: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.asset_type == "skill")
+            .map(|c| c.id_or_name.as_str())
+            .collect();
+
+        assert!(
+            skill_names.contains(&"real-skill"),
+            "skill with SKILL.md must be present; got: {:?}",
+            skill_names
+        );
+        assert!(
+            !skill_names.contains(&"junk-dir"),
+            "dir without SKILL.md must be excluded; got: {:?}",
+            skill_names
+        );
     }
 }
