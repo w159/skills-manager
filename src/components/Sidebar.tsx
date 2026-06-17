@@ -4,6 +4,11 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Layers,
+  Bot,
+  Terminal,
+  Anchor,
+  FileCode2,
+  BookOpen,
   Globe,
   Download,
   Settings,
@@ -68,10 +73,21 @@ export function Sidebar() {
   const [orderedLobsterTools, setOrderedLobsterTools] = useState(installedLobsterTools);
   const presetReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
   const projectReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [libraryOpen, setLibraryOpen] = useState(true);
   const [presetsOpen, setPresetsOpen] = useState(true);
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [globalWorkspaceOpen, setGlobalWorkspaceOpen] = useState(true);
   const [lobsterWorkspaceOpen, setLobsterWorkspaceOpen] = useState(true);
+
+  // Data-driven Library entries. Adding a new asset type = one new object here.
+  const LIBRARY_ITEMS = [
+    { type: "skill",   label: t("sidebar.skills"),   icon: Layers    },
+    { type: "agent",   label: t("sidebar.agents"),   icon: Bot       },
+    { type: "command", label: t("sidebar.commands"), icon: Terminal  },
+    { type: "hook",    label: t("sidebar.hooks"),    icon: Anchor    },
+    { type: "script",  label: t("sidebar.scripts"),  icon: FileCode2 },
+    { type: "rule",    label: t("sidebar.rules"),    icon: BookOpen  },
+  ] as const;
 
   const globalSkillsByAgent = useMemo(() => {
     const map: Record<string, number> = {};
@@ -165,7 +181,6 @@ export function Sidebar() {
 
   const NAV_ITEMS = [
     { name: t("sidebar.dashboard"), path: "/", icon: LayoutDashboard, activePrefix: null as string | null },
-    { name: t("sidebar.mySkills"), path: "/library/skill", icon: Layers, activePrefix: "/library" },
     { name: t("sidebar.installSkills"), path: "/install", icon: Download, activePrefix: null as string | null },
   ];
 
@@ -391,11 +406,11 @@ export function Sidebar() {
 
         {/* Nav */}
         <div className="px-2.5 space-y-0.5 shrink-0">
-          {NAV_ITEMS.map((item) => {
+          {/* Dashboard */}
+          {(() => {
+            const item = NAV_ITEMS[0];
             const Icon = item.icon;
-            const isActive = item.activePrefix
-              ? location.pathname.startsWith(item.activePrefix)
-              : location.pathname === item.path;
+            const isActive = location.pathname === item.path;
             return (
               <Link
                 key={item.path}
@@ -411,7 +426,67 @@ export function Sidebar() {
                 {item.name}
               </Link>
             );
-          })}
+          })()}
+
+          {/* Library — collapsible section with one entry per asset type */}
+          <div className="pt-1">
+            <div className="px-0 flex items-center gap-1 mb-0.5">
+              <button
+                onClick={() => setLibraryOpen((v) => !v)}
+                className="flex min-w-0 flex-1 items-center gap-1 px-2.5 py-[7px] rounded-[5px] text-sm font-medium transition-colors outline-none text-tertiary hover:text-secondary hover:bg-surface-hover"
+              >
+                {libraryOpen
+                  ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
+                  : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted" />}
+                <span className="ml-0.5">{t("sidebar.library")}</span>
+              </button>
+            </div>
+            {libraryOpen && (
+              <div className="space-y-0.5 pl-2">
+                {LIBRARY_ITEMS.map(({ type, label, icon: Icon }) => {
+                  const path = `/library/${type}`;
+                  const isActive = location.pathname === path;
+                  return (
+                    <Link
+                      key={type}
+                      to={path}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2.5 py-[6px] rounded-[5px] text-sm transition-colors outline-none",
+                        isActive
+                          ? "bg-surface-active font-medium text-primary"
+                          : "text-tertiary hover:text-secondary hover:bg-surface-hover"
+                      )}
+                    >
+                      <Icon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-accent" : "text-muted")} />
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Install Skills */}
+          {(() => {
+            const item = NAV_ITEMS[1];
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  "flex items-center gap-2.5 px-2.5 py-[7px] rounded-[5px] text-sm font-medium transition-colors outline-none",
+                  isActive
+                    ? "bg-surface-active text-primary"
+                    : "text-tertiary hover:text-secondary hover:bg-surface-hover"
+                )}
+              >
+                <Icon className={cn("w-4 h-4 shrink-0", isActive ? "text-accent" : "text-muted")} />
+                {item.name}
+              </Link>
+            );
+          })()}
         </div>
 
         {/* Divider */}

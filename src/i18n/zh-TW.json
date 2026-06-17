@@ -5,6 +5,13 @@
   "sidebar": {
     "dashboard": "Dashboard",
     "mySkills": "技能庫",
+    "library": "資產庫",
+    "skills": "技能",
+    "agents": "Agent",
+    "commands": "指令",
+    "hooks": "鉤子",
+    "scripts": "腳本",
+    "rules": "規則",
     "globalWorkspace": "全域工作區",
     "lobsterAgents": "龍蝦 Agent",
     "installSkills": "安裝 Skills",
