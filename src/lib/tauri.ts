@@ -79,6 +79,9 @@ export interface Plugin {
   /** Source URL or repo string resolved from known_marketplaces.json. */
   source: string | null;
   blocked: boolean;
+  /** Whether the plugin is enabled in ~/.claude/settings.json.
+   *  Absent key defaults to true (opt-out: installed = enabled). */
+  enabled: boolean;
   assets: BundledAsset[];
 }
 
@@ -760,6 +763,9 @@ export const deleteGlobalLocalSkill = (agent: string, skillRelativePath: string)
 
 export const listInstalledPlugins = () =>
   invoke<Plugin[]>("list_installed_plugins");
+
+export const setPluginEnabled = (pluginId: string, enabled: boolean) =>
+  invoke<void>("set_plugin_enabled", { pluginId, enabled });
 
 // ── Multi-asset commands ──
 

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, AlertCircle, ChevronRight, ChevronDown, ShieldOff } from "lucide-react";
 import { cn } from "../utils";
-import { listInstalledPlugins } from "../lib/tauri";
+import { listInstalledPlugins, setPluginEnabled } from "../lib/tauri";
 import type { Plugin, BundledAsset } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
+import { toast } from "sonner";
 
 // ── Asset type ordering for the drill-down groups ─────────────────────────────
 
@@ -29,29 +30,101 @@ function sortedGroupEntries(
   return [...known, ...rest].map((k) => [k, grouped[k]]);
 }
 
+// ── Minimal toggle switch component ───────────────────────────────────────────
+
+interface ToggleSwitchProps {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}
+
+function ToggleSwitch({ checked, disabled, onChange, label }: ToggleSwitchProps) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent",
+        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        checked ? "bg-accent" : "bg-surface-hover"
+      )}
+    >
+      <span
+        className={cn(
+          "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+          checked ? "translate-x-4" : "translate-x-0"
+        )}
+      />
+    </button>
+  );
+}
+
 // ── Single plugin row with expandable asset drill-down ────────────────────────
 
-function PluginRow({ plugin }: { plugin: Plugin }) {
+interface PluginRowProps {
+  plugin: Plugin;
+  onToggle: (pluginId: string, enabled: boolean) => void;
+}
+
+function PluginRow({ plugin, onToggle }: PluginRowProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const grouped = groupByType(plugin.assets);
   const groupEntries = sortedGroupEntries(grouped);
   const ChevronIcon = open ? ChevronDown : ChevronRight;
 
-  return (
-    <div className="rounded-lg border border-border bg-surface">
-      {/* Header row */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex w-full items-start gap-3 p-3 text-left transition-colors hover:bg-surface-hover",
-          open && "rounded-t-lg"
-        )}
-      >
-        <ChevronIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+  const handleToggle = async (next: boolean) => {
+    setToggling(true);
+    // Optimistic update via parent callback.
+    onToggle(plugin.id, next);
+    try {
+      await setPluginEnabled(plugin.id, next);
+      toast.success(
+        next
+          ? t("plugins.enabledToast", { name: plugin.name })
+          : t("plugins.disabledToast", { name: plugin.name })
+      );
+    } catch (e) {
+      // Revert on failure.
+      onToggle(plugin.id, !next);
+      toast.error(getErrorMessage(e, t("common.error")));
+    } finally {
+      setToggling(false);
+    }
+  };
 
-        <div className="min-w-0 flex-1">
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border bg-surface",
+        !plugin.enabled && "opacity-60"
+      )}
+    >
+      {/* Header row */}
+      <div className="flex items-start gap-3 p-3">
+        {/* Expand chevron -- clicking it toggles the drill-down */}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="mt-0.5 flex shrink-0 items-center text-muted hover:text-secondary transition-colors"
+        >
+          <ChevronIcon className="h-4 w-4" />
+        </button>
+
+        {/* Main content -- also clickable to expand */}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="min-w-0 flex-1 text-left"
+        >
           {/* Name + badges */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-medium text-primary">{plugin.name}</span>
@@ -84,8 +157,32 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
                 .join(", ")}
             </p>
           )}
+        </button>
+
+        {/* Enable/disable toggle -- sits at the trailing edge, stops propagation */}
+        <div className="flex shrink-0 flex-col items-end gap-1 ml-2">
+          <ToggleSwitch
+            checked={plugin.enabled}
+            disabled={toggling}
+            onChange={(next) => void handleToggle(next)}
+            label={
+              plugin.enabled
+                ? t("plugins.disableLabel", { name: plugin.name })
+                : t("plugins.enableLabel", { name: plugin.name })
+            }
+          />
+          {!plugin.enabled && (
+            <span className="text-[10px] text-muted">{t("plugins.disabled")}</span>
+          )}
         </div>
-      </button>
+      </div>
+
+      {/* Session-restart notice -- shown when plugin is disabled */}
+      {!plugin.enabled && (
+        <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted">
+          {t("plugins.sessionRestartNote")}
+        </p>
+      )}
 
       {/* Drill-down: bundled assets grouped by type */}
       {open && (
@@ -145,6 +242,13 @@ export function PluginsPanel() {
     void load();
   }, [load]);
 
+  // Optimistic toggle: flip the plugin in local state immediately.
+  const handleToggle = useCallback((pluginId: string, enabled: boolean) => {
+    setPlugins((prev) =>
+      prev.map((p) => (p.id === pluginId ? { ...p, enabled } : p))
+    );
+  }, []);
+
   // Loading state
   if (loading) {
     return (
@@ -184,7 +288,7 @@ export function PluginsPanel() {
   return (
     <div className="flex flex-col gap-1.5">
       {plugins.map((plugin) => (
-        <PluginRow key={plugin.id} plugin={plugin} />
+        <PluginRow key={plugin.id} plugin={plugin} onToggle={handleToggle} />
       ))}
     </div>
   );

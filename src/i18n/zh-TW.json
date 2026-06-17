@@ -848,6 +848,12 @@
     "emptyTitle": "尚未安裝任何插件",
     "emptyHint": "透過 CLI 安裝插件後即可在此查看。",
     "blocked": "已封鎖",
-    "noAssets": "無捆綁資產"
+    "noAssets": "無捆綁資產",
+    "disabled": "已停用",
+    "enableLabel": "啟用 {{name}}",
+    "disableLabel": "停用 {{name}}",
+    "enabledToast": "{{name}} 已啟用",
+    "disabledToast": "{{name}} 已停用",
+    "sessionRestartNote": "變更將於下次代理工作階段時生效。"
   }
 }

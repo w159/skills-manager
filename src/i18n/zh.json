@@ -932,6 +932,12 @@
     "emptyTitle": "未安装任何插件",
     "emptyHint": "通过 CLI 安装插件后即可在此查看。",
     "blocked": "已屏蔽",
-    "noAssets": "无捆绑资产"
+    "noAssets": "无捆绑资产",
+    "disabled": "已禁用",
+    "enableLabel": "启用 {{name}}",
+    "disableLabel": "禁用 {{name}}",
+    "enabledToast": "{{name}} 已启用",
+    "disabledToast": "{{name}} 已禁用",
+    "sessionRestartNote": "更改将在下次代理会话时生效。"
   }
 }

@@ -932,6 +932,12 @@
     "emptyTitle": "No plugins installed",
     "emptyHint": "Install plugins via the CLI to see them here.",
     "blocked": "Blocked",
-    "noAssets": "No bundled assets"
+    "noAssets": "No bundled assets",
+    "disabled": "Disabled",
+    "enableLabel": "Enable {{name}}",
+    "disableLabel": "Disable {{name}}",
+    "enabledToast": "{{name}} enabled",
+    "disabledToast": "{{name}} disabled",
+    "sessionRestartNote": "Changes take effect on the next agent session."
   }
 }
