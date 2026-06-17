@@ -46,9 +46,21 @@ Sub-slices:
   bundled-asset attribution model; frontend Plugins tab = inventory + drill-down. NO writes.
   P1 DONE - VERIFIED (backend: 349 tests, 15 real plugins, zero writes, isolated from deliver;
   frontend: PluginsPanel read-only inventory + drill-down, DTO field-match verified, build green).
-  Display decision: TAG + FILTER (plugin-owned assets show in flat tabs with a "from <plugin>"
-  badge + show/hide toggle) -> that is P2, NEXT.
+  Display decision: TAG + FILTER. P2 DONE - VERIFIED (owning_plugin via source_ref match;
+  badge + filter; 352 tests). Correct-but-inert on current data (no plugin-sourced imports).
   Tidy-up: dead_code warnings on unread PluginManifest fields.
+  P3 enable/disable (APPROVED, gated): toggle enabledPlugins in ~/.claude/settings.json. NOT built.
+  P4 marketplace install: DEFERRED (user did not select; needs own design pass).
+
+### Wave 4 - Extensions  [DONE - VERIFIED]
+AssetType::Extension shell (capability None, no source content yet) + Library tab/nav. 355 tests.
+
+### Remaining (all APPROVED for build; gated writes get a pre-write report at execution)
+- MCP servers: read slice (mcp_discovery + list_mcp_servers + read-only tab) then gated config-merge
+  apply (per-agent renderers + backup-first add-only merge + preview/apply). Open design Q: source of
+  truth for the read tab (live agent configs vs import from workspace mcp.json).
+- P3 plugin enable/disable (gated write to ~/.claude/settings.json enabledPlugins).
+- W0.3 Codex/Copilot home migration (gated; move-symlink-backup + real dir + repopulate 17 active agents).
 - P2: reflect plugin ownership in the flat Skills/Agents/Commands lists (the leak fix) per the
   display decision below. Depends on P1 attribution.
 - P3 (GATED writes): enable/disable installed plugins (Claude Code config).
