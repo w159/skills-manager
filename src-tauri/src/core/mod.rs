@@ -16,6 +16,7 @@ pub mod log_sanitize;
 pub mod migrations;
 pub mod panic_log;
 pub mod path_guard;
+pub mod plugin_discovery;
 pub mod project_scanner;
 pub mod repo_lock;
 pub mod scanner;

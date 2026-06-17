@@ -3,6 +3,7 @@ pub mod assets;
 pub mod browse;
 pub mod git_backup;
 pub mod importer;
+pub mod plugins;
 pub mod projects;
 pub mod scan;
 pub mod presets;

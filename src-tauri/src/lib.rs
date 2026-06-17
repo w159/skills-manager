@@ -1012,6 +1012,8 @@ pub fn run() {
             // Assets (multi-asset-type query + delivery)
             commands::assets::get_managed_assets,
             commands::assets::deliver_managed_asset,
+            // Plugins (read-only discovery)
+            commands::plugins::list_installed_plugins,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
