@@ -812,6 +812,24 @@
   },
   "library": {
     "emptyTitle": "未找到{{type}}",
-    "emptyHint": "此類型尚無管理的資產。"
+    "emptyHint": "此類型尚無管理的資產。",
+    "syncTitle": "同步到 Agent",
+    "syncDone": "已同步",
+    "removeTitle": "移除資產",
+    "removeConfirm": "永久從庫中移除「{{name}}」？",
+    "removeSuccess": "已移除 {{name}}",
+    "importFromWorkspace": "從工作區匯入",
+    "importTitle": "從工作區匯入",
+    "importDesc": "選擇工作區目錄以發現 {{type}} 資產並匯入選取項目。",
+    "importPathPlaceholder": "工作區路徑…",
+    "importBrowse": "瀏覽",
+    "importScan": "掃描",
+    "importEmpty": "未找到資產",
+    "importEmptyHint": "在工作區中未找到此類型的可匯入資產。",
+    "importFound": "找到 {{count}} 個候選項",
+    "importActive": "活躍",
+    "importConfirm": "匯入（{{count}}）",
+    "importSuccess": "已匯入 {{count}} 個資產",
+    "importErrors": "{{count}} 個匯入失敗"
   }
 }

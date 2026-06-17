@@ -896,6 +896,24 @@
   },
   "library": {
     "emptyTitle": "No {{type}}s found",
-    "emptyHint": "Nothing of this type is managed yet."
+    "emptyHint": "Nothing of this type is managed yet.",
+    "syncTitle": "Sync to agents",
+    "syncDone": "Synced",
+    "removeTitle": "Remove asset",
+    "removeConfirm": "Remove \"{{name}}\" from the library permanently?",
+    "removeSuccess": "Removed {{name}}",
+    "importFromWorkspace": "Import from workspace",
+    "importTitle": "Import from workspace",
+    "importDesc": "Choose a workspace directory to discover {{type}} assets and import selected ones.",
+    "importPathPlaceholder": "Workspace path…",
+    "importBrowse": "Browse",
+    "importScan": "Scan",
+    "importEmpty": "No assets found",
+    "importEmptyHint": "No importable assets of this type were found in the workspace.",
+    "importFound": "{{count}} candidate(s) found",
+    "importActive": "active",
+    "importConfirm": "Import ({{count}})",
+    "importSuccess": "Imported {{count}} asset(s)",
+    "importErrors": "{{count}} import(s) failed"
   }
 }

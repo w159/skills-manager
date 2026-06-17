@@ -896,6 +896,24 @@
   },
   "library": {
     "emptyTitle": "未找到{{type}}",
-    "emptyHint": "此类型尚无管理的资产。"
+    "emptyHint": "此类型尚无管理的资产。",
+    "syncTitle": "同步到 Agent",
+    "syncDone": "已同步",
+    "removeTitle": "移除资产",
+    "removeConfirm": "永久从库中移除「{{name}}」？",
+    "removeSuccess": "已移除 {{name}}",
+    "importFromWorkspace": "从工作区导入",
+    "importTitle": "从工作区导入",
+    "importDesc": "选择工作区目录以发现 {{type}} 资产并导入所选项。",
+    "importPathPlaceholder": "工作区路径…",
+    "importBrowse": "浏览",
+    "importScan": "扫描",
+    "importEmpty": "未找到资产",
+    "importEmptyHint": "在工作区中未找到此类型的可导入资产。",
+    "importFound": "找到 {{count}} 个候选项",
+    "importActive": "活跃",
+    "importConfirm": "导入（{{count}}）",
+    "importSuccess": "已导入 {{count}} 个资产",
+    "importErrors": "{{count}} 个导入失败"
   }
 }
