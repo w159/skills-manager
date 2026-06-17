@@ -59,8 +59,19 @@ AssetType::Extension shell (capability None, no source content yet) + Library ta
 - MCP servers: read slice (mcp_discovery + list_mcp_servers + read-only tab) then gated config-merge
   apply (per-agent renderers + backup-first add-only merge + preview/apply). Open design Q: source of
   truth for the read tab (live agent configs vs import from workspace mcp.json).
-- P3 plugin enable/disable (gated write to ~/.claude/settings.json enabledPlugins).
-- W0.3 Codex/Copilot home migration (gated; move-symlink-backup + real dir + repopulate 17 active agents).
+- P3 plugin enable/disable - DONE - VERIFIED. set_plugin_enabled writes enabledPlugins in
+  ~/.claude/settings.json (structure-preserving + backup + parse-validate + serde_json
+  preserve_order so key order survives). PluginsPanel toggle. 364 tests.
+- W0.3 Codex/Copilot home migration - DONE. ~/.codex/agents & ~/.copilot/agents are now real
+  dirs (17/17 active renders copied), symlinks backed up as agents.symlink.bak-20260617-021715
+  (reversible). Sync to Codex/Copilot is now unblocked (foreign-home guard no longer fires).
+
+### Only remaining piece: MCP servers
+Model LOCKED (user): import mcp.json into the central store (like other assets), then
+config-merge-deliver. Build = importer support for mcp/mcp.json -> store; per-agent config
+renderers (claude/codex/copilot/pi + opencode/vscode) with golden tests vs agent_assets.py;
+gated add-only backup-first merge w/ preview-then-apply; frontend MCP tab. Its own focused slice.
+P4 marketplace install remains deferred (own design pass).
 - P2: reflect plugin ownership in the flat Skills/Agents/Commands lists (the leak fix) per the
   display decision below. Depends on P1 attribution.
 - P3 (GATED writes): enable/disable installed plugins (Claude Code config).
