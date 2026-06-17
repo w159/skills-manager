@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deliver respects tool enablement; missing-file condition returns a typed error rather than silent no-op (commit 3bad200).
 - 330 Rust tests green; backend stages independently verified end-to-end (import -> render -> disk). Frontend verified via build/lint/static type checks; live desktop runtime smoke (npm run tauri:dev) is a manual step.
 
+## [1.23.2] - 2026-06-17
+
+### Release Overview
+- A sync-accuracy fix: copy-mode skills that contain Python scripts no longer get falsely flagged "center changed" after their scripts run, because compiled-Python artifacts are now excluded from skill content hashing.
+
+### User-facing
+- **Running a skill's Python scripts no longer marks it as out-of-sync** — For skills deployed in copy mode, executing their Python scripts created `__pycache__/*.pyc` bytecode caches inside the agent's copy. Those cache files were folded into the skill's content hash, so the copy diverged from the central library and the skill stayed flagged "center changed" until a manual re-sync. `__pycache__` directories and `*.pyc` files are now excluded from content hashing (and from the source-diff view), so a skill keeps reading as in-sync after its scripts run. Symlink-mode skills were never affected, since the deployed link and the library are the same files.
+
+### Developer & Governance
+- `content_hash` now ignores `__pycache__` and `*.pyc` through the shared `list_content_files` enumeration, so the update badge and the source-diff stay consistent; added unit tests covering both a `__pycache__` directory and a loose `.pyc` file.
+
 ## [1.23.1] - 2026-06-10
 
 ### Release Overview

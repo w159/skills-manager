@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.23.2] - 2026-06-17
+
+### 发布概览
+- 同步状态准确性修复：copy 模式下包含 Python 脚本的 skill，在脚本运行后不再被误标为「中心有变更」——编译产物现在不再计入 skill 内容哈希。
+
+### 用户可见更新
+- **运行 skill 的 Python 脚本不再导致它被标记为未同步** —— 对于以 copy 模式部署的 skill，执行其 Python 脚本会在 agent 副本里生成 `__pycache__/*.pyc` 字节码缓存。这些缓存文件此前被算进 skill 的内容哈希，导致副本与中心库不一致，该 skill 会一直被误标为「中心有变更」，直到手动重新同步。现在 `__pycache__` 目录与 `*.pyc` 文件已从内容哈希（以及来源差异视图）中排除，脚本运行后 skill 仍保持「与中心一致」。symlink 模式的 skill 从不受此影响，因为部署的链接与中心库是同一份文件。
+
+### 开发者与治理更新
+- `content_hash` 现在通过共享的 `list_content_files` 枚举忽略 `__pycache__` 与 `*.pyc`，使更新标记与来源差异视图保持一致；新增覆盖 `__pycache__` 目录与散落 `.pyc` 文件的单元测试。
+
 ## [1.23.1] - 2026-06-10
 
 ### 发布概览

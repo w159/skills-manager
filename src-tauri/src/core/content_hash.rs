@@ -3,7 +3,16 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-const IGNORED: &[&str] = &[".git", ".DS_Store", "Thumbs.db", ".gitignore"];
+const IGNORED: &[&str] = &[".git", ".DS_Store", "Thumbs.db", ".gitignore", "__pycache__"];
+
+/// True for names excluded from a skill's content scope: the exact-match
+/// [`IGNORED`] entries plus compiled-Python artifacts (`*.pyc`). These are
+/// regenerated whenever a skill's Python scripts run, so without excluding
+/// them a copy-mode deployment would read as permanently "changed" against
+/// the library the first time the skill is used.
+fn is_ignored(name: &str) -> bool {
+    IGNORED.contains(&name) || name.ends_with(".pyc")
+}
 
 /// One file in a skill's canonical "content scope" — the set of files that
 /// both [`hash_directory`] and the source-diff command operate on. Sharing
@@ -44,7 +53,7 @@ pub fn list_content_files(dir: &Path) -> Vec<ContentEntry> {
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            !IGNORED.contains(&name.as_ref())
+            !is_ignored(&name)
         })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -151,6 +160,37 @@ mod tests {
         let h1 = hash_directory(tmp.path()).unwrap();
 
         fs::write(tmp.path().join(".DS_Store"), "binary stuff").unwrap();
+        let h2 = hash_directory(tmp.path()).unwrap();
+
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_ignores_pycache() {
+        let tmp = tempdir().unwrap();
+        fs::write(tmp.path().join("run.py"), "print('hi')").unwrap();
+        let h1 = hash_directory(tmp.path()).unwrap();
+
+        // Running the script generates a __pycache__ dir — hash must not change.
+        fs::create_dir_all(tmp.path().join("__pycache__")).unwrap();
+        fs::write(
+            tmp.path().join("__pycache__/run.cpython-311.pyc"),
+            "bytecode",
+        )
+        .unwrap();
+        let h2 = hash_directory(tmp.path()).unwrap();
+
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_ignores_loose_pyc() {
+        let tmp = tempdir().unwrap();
+        fs::write(tmp.path().join("a.py"), "x = 1").unwrap();
+        let h1 = hash_directory(tmp.path()).unwrap();
+
+        // A .pyc sitting next to its source (not under __pycache__) is excluded too.
+        fs::write(tmp.path().join("a.pyc"), "bytecode").unwrap();
         let h2 = hash_directory(tmp.path()).unwrap();
 
         assert_eq!(h1, h2);
