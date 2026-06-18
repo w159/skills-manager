@@ -45,3 +45,11 @@ Thumbs.db
 .skills-manager/
 .skills-manager.lock
 .fallow/
+
+# iCloud Drive sync duplicates (e.g. "importer 2.rs", "references 2/", "index 3.html")
+# This repo lives under iCloud Drive, which spawns " N"-suffixed copies on sync conflicts.
+# These are always cruft; never commit them. (Already-tracked files are unaffected.)
+* [0-9]
+* [0-9].*
+* [0-9][0-9]
+* [0-9][0-9].*
