@@ -459,6 +459,12 @@ export const syncSkillToTool = (skillId: string, tool: string) =>
 export const unsyncSkillFromTool = (skillId: string, tool: string) =>
   invoke<void>("unsync_skill_from_tool", { skillId, tool });
 
+export const batchSyncSkillsToTools = (skillIds: string[], toolKeys: string[]) =>
+  invoke<void>("batch_sync_skills_to_tools", { skillIds, toolKeys });
+
+export const batchUnsyncSkillsFromTools = (skillIds: string[], toolKeys: string[]) =>
+  invoke<void>("batch_unsync_skills_from_tools", { skillIds, toolKeys });
+
 export const getSkillToolToggles = (skillId: string, presetId: string) =>
   invoke<SkillToolToggle[]>("get_skill_tool_toggles", { skillId, presetId });
 

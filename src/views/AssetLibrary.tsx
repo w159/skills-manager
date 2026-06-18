@@ -11,8 +11,11 @@ import {
 import { cn } from "../utils";
 import { MySkills } from "./MySkills";
 import { PluginsPanel } from "./PluginsPanel";
+import { SyncDots } from "../components/SyncDots";
+import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
+import { useApp } from "../context/AppContext";
 import * as api from "../lib/tauri";
-import type { AssetType, ManagedAsset, ImportCandidate } from "../lib/tauri";
+import type { AssetType, ManagedAsset, ManagedSkill, ImportCandidate } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
@@ -196,6 +199,137 @@ function AssetRow({ asset, onRemoved }: AssetRowProps) {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Agent asset row (extends AssetRow with per-tool sync dots) ────────────────
+
+interface AgentAssetRowProps {
+  asset: ManagedAsset;
+  /** Full ManagedSkill record for this agent (carries targets[] for dot state). */
+  skill: ManagedSkill | null;
+  selected: boolean;
+  isMultiSelect: boolean;
+  pendingTool: string | null;
+  onToggleTool: (tool: string, enabled: boolean) => void;
+  onRemoved: () => void;
+  onSelectToggle: () => void;
+}
+
+function AgentAssetRow({
+  asset,
+  skill,
+  selected,
+  isMultiSelect,
+  pendingTool,
+  onToggleTool,
+  onRemoved,
+  onSelectToggle,
+}: AgentAssetRowProps) {
+  const { t } = useTranslation();
+  const { tools } = useApp();
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!removeOpen) return;
+    const handlePointer = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setRemoveOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRemoveOpen(false); };
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [removeOpen]);
+
+  const handleRemoveConfirm = async () => {
+    setRemoveOpen(false);
+    try {
+      await api.deleteManagedAsset(asset.id);
+      toast.success(t("library.removeSuccess", { name: asset.name }));
+      onRemoved();
+    } catch (e) {
+      toast.error(getErrorMessage(e, t("common.error")));
+    }
+  };
+
+  const pluginDisplayName = asset.owning_plugin?.split("@")[0] ?? null;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-[6px] border bg-surface px-3.5 py-3 text-sm transition-colors",
+        selected ? "border-accent/50 bg-accent/5" : "border-border-subtle",
+        isMultiSelect && "cursor-pointer hover:border-accent/30"
+      )}
+      onClick={isMultiSelect ? onSelectToggle : undefined}
+    >
+      {/* Multi-select checkbox */}
+      {isMultiSelect && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onSelectToggle}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 shrink-0 accent-primary"
+        />
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate font-medium text-primary">{asset.name}</span>
+        {asset.description && (
+          <span className="truncate text-[12px] text-muted">{asset.description}</span>
+        )}
+      </div>
+
+      {pluginDisplayName && (
+        <span
+          className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+          title={asset.owning_plugin ?? undefined}
+        >
+          {t("library.fromPlugin", { name: pluginDisplayName })}
+        </span>
+      )}
+
+      {/* Per-tool sync dots - only when not in multi-select mode */}
+      {skill && !isMultiSelect && (
+        <SyncDots
+          skill={skill}
+          tools={tools}
+          limit={6}
+          onToggle={onToggleTool}
+          pendingKey={pendingTool}
+        />
+      )}
+
+      {/* Remove button with inline confirm popover */}
+      {!isMultiSelect && (
+        <div ref={containerRef} className="relative shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); setRemoveOpen((v) => !v); }}
+            title={t("library.removeTitle")}
+            className={cn(
+              "rounded text-faint transition-colors hover:text-red-400 outline-none",
+              removeOpen && "text-red-400"
+            )}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          {removeOpen && (
+            <RemovePopover
+              assetName={asset.name}
+              onConfirm={() => void handleRemoveConfirm()}
+              onClose={() => setRemoveOpen(false)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -478,12 +612,21 @@ interface AssetTabPanelProps {
 
 function AssetTabPanel({ assetType }: AssetTabPanelProps) {
   const { t } = useTranslation();
+  const { managedSkills, tools, refreshManagedSkills } = useApp();
   const [assets, setAssets] = useState<ManagedAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   // Filter: when false, rows with owning_plugin are hidden.
   const [showPluginOwned, setShowPluginOwned] = useState(true);
+
+  // Agent multi-select state
+  const [isMultiSelect, setIsMultiSelect] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Per-row pending tool key for optimistic loading dots
+  const [pendingToggle, setPendingToggle] = useState<{ agentId: string; tool: string } | null>(null);
+
+  const isAgent = assetType === "agent";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -502,6 +645,12 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
     void load();
   }, [load]);
 
+  // Reset multi-select when switching tabs
+  useEffect(() => {
+    setIsMultiSelect(false);
+    setSelectedIds(new Set());
+  }, [assetType]);
+
   const handleImported = useCallback(() => { void load(); }, [load]);
 
   // Whether any asset in this list carries plugin attribution.
@@ -512,6 +661,90 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
     () => (showPluginOwned ? assets : assets.filter((a) => a.owning_plugin == null)),
     [assets, showPluginOwned]
   );
+
+  // Build a lookup from asset id -> ManagedSkill (which carries targets[])
+  const skillById = useMemo(() => {
+    const map = new Map<string, ManagedSkill>();
+    for (const s of managedSkills) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [managedSkills]);
+
+  // Single-agent per-tool toggle (mirrors MySkills handleToggleSkillTarget)
+  const handleToggleTool = useCallback(
+    async (agentId: string, toolKey: string, enabled: boolean) => {
+      if (pendingToggle) return;
+      setPendingToggle({ agentId, tool: toolKey });
+      try {
+        if (enabled) {
+          await api.syncSkillToTool(agentId, toolKey);
+        } else {
+          await api.unsyncSkillFromTool(agentId, toolKey);
+        }
+        await refreshManagedSkills();
+      } catch (e) {
+        toast.error(getErrorMessage(e, t("common.error")));
+        await refreshManagedSkills();
+      } finally {
+        setPendingToggle(null);
+      }
+    },
+    [pendingToggle, refreshManagedSkills, t]
+  );
+
+  // Batch sync/unsync for multi-selected agents (mirrors handleBatchTogglePreset pattern)
+  const handleBatchSync = useCallback(
+    async (enable: boolean) => {
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) return;
+      const toolKeys = tools
+        .filter((tool) => tool.installed && tool.enabled)
+        .map((tool) => tool.key);
+      if (toolKeys.length === 0) return;
+      try {
+        if (enable) {
+          await api.batchSyncSkillsToTools(ids, toolKeys);
+        } else {
+          await api.batchUnsyncSkillsFromTools(ids, toolKeys);
+        }
+        await refreshManagedSkills();
+      } catch (e) {
+        toast.error(getErrorMessage(e, t("common.error")));
+        await refreshManagedSkills();
+      } finally {
+        setIsMultiSelect(false);
+        setSelectedIds(new Set());
+      }
+    },
+    [selectedIds, tools, refreshManagedSkills, t]
+  );
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(visibleAssets.map((a) => a.id)));
+  }, [visibleAssets]);
+
+  const exitMultiSelect = useCallback(() => {
+    setIsMultiSelect(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  // Whether any selected agent has at least one synced target (used for anyDisabled toggle label)
+  const anyUnsynced = useMemo(() => {
+    for (const id of selectedIds) {
+      const skill = skillById.get(id);
+      if (!skill || skill.targets.length === 0) return true;
+    }
+    return false;
+  }, [selectedIds, skillById]);
 
   if (loading) {
     return (
@@ -538,7 +771,7 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
 
   return (
     <>
-      {/* Toolbar: import button + optional plugin-owned toggle */}
+      {/* Toolbar: import button + optional plugin-owned toggle + agent multi-select toggle */}
       <div className="mb-3 flex items-center justify-between gap-2">
         {hasPluginOwned && (
           <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-muted select-none">
@@ -551,7 +784,22 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
             {t("library.showPluginOwned")}
           </label>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {isAgent && visibleAssets.length > 0 && (
+            <button
+              type="button"
+              onClick={() => (isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true))}
+              className={cn(
+                "rounded px-2 py-1 text-[12px] font-medium transition-colors outline-none",
+                isMultiSelect
+                  ? "bg-surface-active text-secondary"
+                  : "text-muted hover:text-tertiary"
+              )}
+              title={isMultiSelect ? t("mySkills.cancelSelect") : t("mySkills.selectMode")}
+            >
+              {isMultiSelect ? t("mySkills.cancelSelect") : t("mySkills.selectMode")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setImportOpen(true)}
@@ -563,6 +811,33 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
         </div>
       </div>
 
+      {/* Agent multi-select toolbar */}
+      {isAgent && isMultiSelect && (
+        <MultiSelectToolbar
+          selectedCount={selectedIds.size}
+          isAllSelected={selectedIds.size === visibleAssets.length}
+          anyDisabled={anyUnsynced}
+          showToggle={selectedIds.size > 0}
+          labels={{
+            hint: t("mySkills.selectHint"),
+            selected: t("mySkills.selectedCount", { count: selectedIds.size }),
+            selectAll: t("mySkills.selectAll"),
+            deselectAll: t("mySkills.deselectAll"),
+            delete: t("mySkills.deleteSelected", { count: selectedIds.size }),
+            enable: t("mySkills.batchEnable", { count: selectedIds.size }),
+            disable: t("mySkills.batchDisable", { count: selectedIds.size }),
+            cancel: t("common.cancel"),
+          }}
+          onToggle={() => void handleBatchSync(anyUnsynced)}
+          onSelectAll={selectAll}
+          onDelete={() => {
+            // Bulk delete not wired for agents yet - exit select mode
+            exitMultiSelect();
+          }}
+          onCancel={exitMultiSelect}
+        />
+      )}
+
       {visibleAssets.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
           <p className="text-sm font-medium text-secondary">
@@ -572,9 +847,25 @@ function AssetTabPanel({ assetType }: AssetTabPanelProps) {
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {visibleAssets.map((asset) => (
-            <AssetRow key={asset.id} asset={asset} onRemoved={() => void load()} />
-          ))}
+          {visibleAssets.map((asset) =>
+            isAgent ? (
+              <AgentAssetRow
+                key={asset.id}
+                asset={asset}
+                skill={skillById.get(asset.id) ?? null}
+                selected={selectedIds.has(asset.id)}
+                isMultiSelect={isMultiSelect}
+                pendingTool={
+                  pendingToggle?.agentId === asset.id ? pendingToggle.tool : null
+                }
+                onToggleTool={(tool, enabled) => void handleToggleTool(asset.id, tool, enabled)}
+                onRemoved={() => { void load(); void refreshManagedSkills(); }}
+                onSelectToggle={() => toggleSelected(asset.id)}
+              />
+            ) : (
+              <AssetRow key={asset.id} asset={asset} onRemoved={() => void load()} />
+            )
+          )}
         </div>
       )}
 
