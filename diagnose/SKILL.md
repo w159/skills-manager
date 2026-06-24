@@ -1,117 +1,106 @@
 ---
 name: diagnose
-description: Disciplined diagnosis loop for hard bugs and performance regressions. Reproduce → minimise → hypothesise → instrument → fix → regression-test. Use when user says "diagnose this" / "debug this", reports a bug, says something is broken/throwing/failing, or describes a performance regression.
+description: "Perform a systematic diagnostic scan of an AI workflow across 5 quality dimensions — prompt quality, context efficiency, tool health, architecture fitness, and safety — producing a scored report with prioritized remediation actions."
 ---
 
-# Diagnose
+# AI Workflow Diagnostics
 
-A discipline for hard bugs. Skip phases only when explicitly justified.
+You are a systematic AI workflow auditor. Perform a diagnostic scan across 5 dimensions. For each dimension, score 1–5 and provide specific findings.
 
-When exploring the codebase, use the project's domain glossary to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
+## Dimension 1: Prompt Quality (1–5)
 
-## Phase 1 — Build a feedback loop
+Evaluate:
 
-**This is the skill.** Everything else is mechanical. If you have a fast, deterministic, agent-runnable pass/fail signal for the bug, you will find the cause — bisection, hypothesis-testing, and instrumentation all just consume that signal. If you don't have one, no amount of staring at code will save you.
+- Structure (role, context, instructions, output zones)
+- Output schema definition (explicit vs. implicit)
+- Instruction clarity (specific vs. vague)
+- Edge case handling (addressed vs. ignored)
+- Anti-patterns (wall of text, contradictions, implicit format)
 
-Spend disproportionate effort here. **Be aggressive. Be creative. Refuse to give up.**
+## Dimension 2: Context Efficiency (1–5)
 
-### Ways to construct one — try them in roughly this order
+Evaluate:
 
-1. **Failing test** at whatever seam reaches the bug — unit, integration, e2e.
-2. **Curl / HTTP script** against a running dev server.
-3. **CLI invocation** with a fixture input, diffing stdout against a known-good snapshot.
-4. **Headless browser script** (Playwright / Puppeteer) — drives the UI, asserts on DOM/console/network.
-5. **Replay a captured trace.** Save a real network request / payload / event log to disk; replay it through the code path in isolation.
-6. **Throwaway harness.** Spin up a minimal subset of the system (one service, mocked deps) that exercises the bug code path with a single function call.
-7. **Property / fuzz loop.** If the bug is "sometimes wrong output", run 1000 random inputs and look for the failure mode.
-8. **Bisection harness.** If the bug appeared between two known states (commit, dataset, version), automate "boot at state X, check, repeat" so you can `git bisect run` it.
-9. **Differential loop.** Run the same input through old-version vs new-version (or two configs) and diff outputs.
-10. **HITL bash script.** Last resort. If a human must click, drive _them_ with `scripts/hitl-loop.template.sh` so the loop is still structured. Captured output feeds back to you.
+- Context budget allocation (planned vs. ad-hoc)
+- Attention gradient awareness (critical info at start/end)
+- Context window utilization (efficient vs. wasteful)
+- State management (explicit vs. implicit)
+- Memory strategy (appropriate for conversation length)
 
-Build the right feedback loop, and the bug is 90% fixed.
+## Dimension 3: Tool Health (1–5)
 
-### Iterate on the loop itself
+Evaluate:
 
-Treat the loop as a product. Once you have _a_ loop, ask:
+- Tool count (3–7 ideal, 13+ problematic)
+- Description quality (specific vs. vague)
+- Error handling (graceful vs. none)
+- Schema completeness (input/output/error defined)
+- Idempotency (safe to retry vs. side-effect prone)
+- **Scope attribution**: Distinguish project-configured tools (custom scripts, project MCP servers) from agent-level tools (built-in IDE tools, global MCP servers). Only flag tool overhead for tools the project can actually control.
 
-- Can I make it faster? (Cache setup, skip unrelated init, narrow the test scope.)
-- Can I make the signal sharper? (Assert on the specific symptom, not "didn't crash".)
-- Can I make it more deterministic? (Pin time, seed RNG, isolate filesystem, freeze network.)
+## Dimension 4: Architecture Fitness (1–5)
 
-A 30-second flaky loop is barely better than no loop. A 2-second deterministic loop is a debugging superpower.
+Evaluate:
 
-### Non-deterministic bugs
+- Topology appropriateness (single vs. multi-agent justified)
+- Agent boundaries (clear vs. overlapping)
+- Handoff protocols (structured vs. ad-hoc)
+- Observability (decisions logged vs. black box)
+- Cost awareness (budgeted vs. unbounded)
 
-The goal is not a clean repro but a **higher reproduction rate**. Loop the trigger 100×, parallelise, add stress, narrow timing windows, inject sleeps. A 50%-flake bug is debuggable; 1% is not — keep raising the rate until it's debuggable.
+## Dimension 5: Safety & Reliability (1–5)
 
-### When you genuinely cannot build a loop
+Evaluate:
 
-Stop and say so explicitly. List what you tried. Ask the user for: (a) access to whatever environment reproduces it, (b) a captured artifact (HAR file, log dump, core dump, screen recording with timestamps), or (c) permission to add temporary production instrumentation. Do **not** proceed to hypothesise without a loop.
+- Input validation (present vs. absent)
+- Output filtering (PII, content policy) — scope contextually: data between a user's own frontend and backend is lower risk than data exposed to external services
+- Cost controls (ceilings set vs. unbounded)
+- Error recovery (fallbacks vs. crash)
+- Evaluation strategy (golden tests vs. "it seems to work")
 
-Do not proceed to Phase 2 until you have a loop you believe in.
+## Diagnostic Report Format
 
-## Phase 2 — Reproduce
+```text
+╔══════════════════════════════════════╗
+║          WORKFLOW DIAGNOSTIC        ║
+╠══════════════════════════════════════╣
+║ Prompt Quality      ████░  4/5      ║
+║ Context Efficiency   ███░░  3/5      ║
+║ Tool Health          ██░░░  2/5      ║
+║ Architecture         ████░  4/5      ║
+║ Safety & Reliability ██░░░  2/5      ║
+╠══════════════════════════════════════╣
+║ Overall Score:       15/25           ║
+╚══════════════════════════════════════╝
 
-Run the loop. Watch the bug appear.
+CRITICAL FINDINGS:
+1. [Most severe issue — immediate action needed]
+2. [Second most severe]
+3. [Third]
 
-Confirm:
+RECOMMENDED ACTIONS:
+1. [Specific remediation for finding #1]
+2. [Specific remediation for finding #2]
+3. [Specific remediation for finding #3]
+```
 
-- [ ] The loop produces the failure mode the **user** described — not a different failure that happens to be nearby. Wrong bug = wrong fix.
-- [ ] The failure is reproducible across multiple runs (or, for non-deterministic bugs, reproducible at a high enough rate to debug against).
-- [ ] You have captured the exact symptom (error message, wrong output, slow timing) so later phases can verify the fix actually addresses it.
+## Scoring Guide
 
-Do not proceed until you reproduce the bug.
+| Score | Meaning                | Recommended Action                        |
+|-------|------------------------|-------------------------------------------|
+| 5     | Production-excellent   | No action needed                          |
+| 4     | Good with minor gaps   | Polish prompt clarity or output schema    |
+| 3     | Functional but risky   | Add error handling or reduce complexity   |
+| 2     | Significant issues     | Immediate attention — add retries/guards  |
+| 1     | Broken or missing      | Rebuild from scratch with clear structure |
 
-## Phase 3 — Hypothesise
+## Usage
 
-Generate **3–5 ranked hypotheses** before testing any of them. Single-hypothesis generation anchors on the first plausible idea.
+Invoke this skill when you want to:
 
-Each hypothesis must be **falsifiable**: state the prediction it makes.
+- Find hidden problems before a workflow goes to production
+- Audit an existing agent for quality and reliability
+- Get a prioritized remediation plan with concrete next steps
+- Health-check a workflow after significant changes
 
-> Format: "If <X> is the cause, then <changing Y> will make the bug disappear / <changing Z> will make it worse."
-
-If you cannot state the prediction, the hypothesis is a vibe — discard or sharpen it.
-
-**Show the ranked list to the user before testing.** They often have domain knowledge that re-ranks instantly ("we just deployed a change to #3"), or know hypotheses they've already ruled out. Cheap checkpoint, big time saver. Don't block on it — proceed with your ranking if the user is AFK.
-
-## Phase 4 — Instrument
-
-Each probe must map to a specific prediction from Phase 3. **Change one variable at a time.**
-
-Tool preference:
-
-1. **Debugger / REPL inspection** if the env supports it. One breakpoint beats ten logs.
-2. **Targeted logs** at the boundaries that distinguish hypotheses.
-3. Never "log everything and grep".
-
-**Tag every debug log** with a unique prefix, e.g. `[DEBUG-a4f2]`. Cleanup at the end becomes a single grep. Untagged logs survive; tagged logs die.
-
-**Perf branch.** For performance regressions, logs are usually wrong. Instead: establish a baseline measurement (timing harness, `performance.now()`, profiler, query plan), then bisect. Measure first, fix second.
-
-## Phase 5 — Fix + regression test
-
-Write the regression test **before the fix** — but only if there is a **correct seam** for it.
-
-A correct seam is one where the test exercises the **real bug pattern** as it occurs at the call site. If the only available seam is too shallow (single-caller test when the bug needs multiple callers, unit test that can't replicate the chain that triggered the bug), a regression test there gives false confidence.
-
-**If no correct seam exists, that itself is the finding.** Note it. The codebase architecture is preventing the bug from being locked down. Flag this for the next phase.
-
-If a correct seam exists:
-
-1. Turn the minimised repro into a failing test at that seam.
-2. Watch it fail.
-3. Apply the fix.
-4. Watch it pass.
-5. Re-run the Phase 1 feedback loop against the original (un-minimised) scenario.
-
-## Phase 6 — Cleanup + post-mortem
-
-Required before declaring done:
-
-- [ ] Original repro no longer reproduces (re-run the Phase 1 loop)
-- [ ] Regression test passes (or absence of seam is documented)
-- [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
-- [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
-- [ ] The hypothesis that turned out correct is stated in the commit / PR message — so the next debugger learns
-
-**Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling) hand off to the `/improve-codebase-architecture` skill with the specifics. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.
+Provide the workflow description, prompt text, tool list, or agent configuration as context. The more detail you provide, the more precise the findings.
