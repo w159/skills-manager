@@ -18,6 +18,9 @@ import {
   Square,
   Plus,
   CircleSlash,
+  CheckCircle2,
+  Circle,
+  Tag,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -148,6 +151,7 @@ export function ProjectDetail() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectSkillGroup | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
+  const [batchToggling, setBatchToggling] = useState(false);
   const PROJECT_ADD_CALLOUT_KEY = "skills-manager.projectAddCalloutDismissed";
   const [showAddCallout, setShowAddCallout] = useState(() => {
     try {
@@ -308,6 +312,9 @@ export function ProjectDetail() {
     filtered,
     getKey: getSkillKey,
     isItemActive: (s) => s.enabledCount === s.totalCount,
+    filterSignal: JSON.stringify([search, [...tagFilters].sort(), filterMode]),
+    scopeSignal: id ?? "",
+    escapeEnabled: !batchTagDialogOpen && !batchDeleteConfirm,
   });
 
   const exportTargets = useMemo(() => {
@@ -438,25 +445,43 @@ export function ProjectDetail() {
     () => groupedSkills.filter((skill) => selectedIds.has(getSkillKey(skill))),
     [getSkillKey, groupedSkills, selectedIds]
   );
-  const selectedTaggableSkills = useMemo(
-    () => selectedSkills.filter((skill) => skill.centerSkillIds.length > 0),
-    [selectedSkills]
-  );
-  const anyCanUpdateCenter = useMemo(
-    () => selectedSkills.some((skill) => (
+  /**
+   * Tags live on the central skill, and one selected row can map to several of
+   * them — so the button counts (and the dialog shows) the central skills that
+   * will actually change, not the rows that were clicked.
+   */
+  const selectedCenterSkills = useMemo(() => {
+    const byId = new Map(managedSkills.map((skill) => [skill.id, skill]));
+    const ids = new Set(selectedSkills.flatMap((skill) => skill.centerSkillIds));
+    return [...ids]
+      .map((centerId) => byId.get(centerId))
+      .filter((skill): skill is ManagedSkill => !!skill);
+  }, [managedSkills, selectedSkills]);
+  // Counts, not booleans: the buttons must announce how many skills they will
+  // actually touch, which is rarely the whole selection.
+  const updatableCenterCount = useMemo(
+    () => selectedSkills.filter((skill) => (
       skill.status === "project_only" ||
       skill.status === "project_newer" ||
       skill.status === "diverged"
-    )),
+    )).length,
     [selectedSkills]
   );
-  const anyCanUpdateProject = useMemo(
-    () => selectedSkills.some((skill) => (
+  const updatableProjectCount = useMemo(
+    () => selectedSkills.filter((skill) => (
       skill.status === "project_newer" ||
       skill.status === "center_newer" ||
       skill.status === "diverged"
-    )),
+    )).length,
     [selectedSkills]
+  );
+  const togglableSelectedCount = useMemo(
+    () => selectedSkills.filter((skill) => (
+      anyDisabled
+        ? skill.enabledCount !== skill.totalCount
+        : skill.enabledCount > 0
+    )).length,
+    [selectedSkills, anyDisabled]
   );
 
   const handleOpenDetail = async (skill: ProjectSkillGroup) => {
@@ -679,41 +704,46 @@ export function ProjectDetail() {
   };
 
   const handleBatchToggleProject = async () => {
-    if (!id) return;
+    if (!id || batchToggling) return;
     const enabling = anyDisabled;
     let count = 0;
     let failed = 0;
-    for (const skill of selectedSkills) {
-      try {
-        if (enabling && skill.enabledCount !== skill.totalCount) {
-          await Promise.all(
-            skill.variants.map((variant) =>
-              api.toggleProjectSkill(id, variant.relative_path, variant.agent, true)
-            )
-          );
-          count++;
-        } else if (!enabling && skill.enabledCount > 0) {
-          await Promise.all(
-            skill.variants.map((variant) =>
-              api.toggleProjectSkill(id, variant.relative_path, variant.agent, false)
-            )
-          );
-          count++;
+    setBatchToggling(true);
+    try {
+      for (const skill of selectedSkills) {
+        try {
+          if (enabling && skill.enabledCount !== skill.totalCount) {
+            await Promise.all(
+              skill.variants.map((variant) =>
+                api.toggleProjectSkill(id, variant.relative_path, variant.agent, true)
+              )
+            );
+            count++;
+          } else if (!enabling && skill.enabledCount > 0) {
+            await Promise.all(
+              skill.variants.map((variant) =>
+                api.toggleProjectSkill(id, variant.relative_path, variant.agent, false)
+              )
+            );
+            count++;
+          }
+        } catch {
+          failed++;
+          // continue with remaining
         }
-      } catch {
-        failed++;
-        // continue with remaining
       }
+      if (count > 0) {
+        toast.success(enabling
+          ? t("project.batchEnabled", { count })
+          : t("project.batchDisabled", { count }));
+      }
+      if (failed > 0) {
+        toast.error(t("project.batchToggleFailed", { count: failed }));
+      }
+      await loadSkills();
+    } finally {
+      setBatchToggling(false);
     }
-    if (count > 0) {
-      toast.success(enabling
-        ? t("project.batchEnabled", { count })
-        : t("project.batchDisabled", { count }));
-    }
-    if (failed > 0) {
-      toast.error(t("project.batchToggleFailed", { count: failed }));
-    }
-    await loadSkills();
   };
 
   const handleBatchUpdateCenter = async () => {
@@ -798,14 +828,10 @@ export function ProjectDetail() {
   };
 
   const handleBatchEditTags = async (adds: string[], removes: string[]) => {
-    const skillMap = new Map(managedSkills.map((skill) => [skill.id, skill]));
-    const centerIds = Array.from(new Set(selectedTaggableSkills.flatMap((skill) => skill.centerSkillIds)));
     let updated = 0;
     let failed = 0;
 
-    for (const centerSkillId of centerIds) {
-      const centerSkill = skillMap.get(centerSkillId);
-      if (!centerSkill) continue;
+    for (const centerSkill of selectedCenterSkills) {
       const removeSet = new Set(removes);
       const nextTags = centerSkill.tags.filter((tag) => !removeSet.has(tag));
       for (const tag of adds) {
@@ -817,7 +843,7 @@ export function ProjectDetail() {
       if (!changed) continue;
 
       try {
-        await api.setSkillTags(centerSkillId, nextTags);
+        await api.setSkillTags(centerSkill.id, nextTags);
         updated++;
       } catch {
         failed++;
@@ -935,17 +961,21 @@ export function ProjectDetail() {
               >
                 <List className="h-4 w-4" />
               </button>
-              <button
-                onClick={() => isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true)}
-                className={cn(
-                  "rounded-md p-2 transition-colors outline-none",
-                  isMultiSelect ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                )}
-                title={isMultiSelect ? t("project.cancelSelect") : t("project.selectMode")}
-              >
-                <SquareCheck className="h-4 w-4" />
-              </button>
             </div>
+
+            {/* Selection is a mode, not a third view — keep it out of the view switcher. */}
+            <button
+              onClick={() => isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true)}
+              className={cn(
+                "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors outline-none",
+                isMultiSelect
+                  ? "border-border bg-surface-active text-secondary"
+                  : "border-border-subtle bg-surface text-muted hover:bg-surface-hover hover:text-secondary"
+              )}
+            >
+              <SquareCheck className="h-4 w-4" />
+              {isMultiSelect ? t("project.cancelSelect") : t("project.selectMode")}
+            </button>
 
             <div className="relative shrink-0">
               <button
@@ -1056,32 +1086,67 @@ export function ProjectDetail() {
         <MultiSelectToolbar
           selectedCount={selectedIds.size}
           isAllSelected={isAllSelected}
-          anyDisabled={anyDisabled}
-          anyCanUpdateCenter={anyCanUpdateCenter}
-          anyCanUpdateProject={anyCanUpdateProject}
-          showToggle={project.supports_skill_toggle}
-          updatingCenter={batchUpdatingCenter}
-          updatingProject={batchUpdatingProject}
+          actions={[
+            ...(project.supports_skill_toggle && togglableSelectedCount > 0
+              ? [{
+                  key: "toggle",
+                  tone: "primary" as const,
+                  label: anyDisabled
+                    ? t("project.batchEnable", { count: togglableSelectedCount })
+                    : t("project.batchDisable", { count: togglableSelectedCount }),
+                  icon: anyDisabled
+                    ? <CheckCircle2 className="h-3.5 w-3.5" />
+                    : <Circle className="h-3.5 w-3.5" />,
+                  busy: batchToggling,
+                  onSelect: handleBatchToggleProject,
+                }]
+              : []),
+            ...(updatableProjectCount > 0
+              ? [{
+                  key: "update-project",
+                  label: t("project.batchUpdateProject", { count: updatableProjectCount }),
+                  icon: <Download className="h-3.5 w-3.5" />,
+                  busy: batchUpdatingProject,
+                  onSelect: handleBatchUpdateProject,
+                }]
+              : []),
+            ...(updatableCenterCount > 0
+              ? [{
+                  key: "update-center",
+                  label: t("project.batchUpdateCenter", { count: updatableCenterCount }),
+                  icon: <Upload className="h-3.5 w-3.5" />,
+                  busy: batchUpdatingCenter,
+                  onSelect: handleBatchUpdateCenter,
+                }]
+              : []),
+          ]}
+          overflowActions={[
+            ...(selectedCenterSkills.length > 0
+              ? [{
+                  key: "tags",
+                  label: t("project.batchEditTags", { count: selectedCenterSkills.length }),
+                  icon: <Tag className="h-3.5 w-3.5" />,
+                  onSelect: () => setBatchTagDialogOpen(true),
+                }]
+              : []),
+            {
+              key: "delete",
+              tone: "danger" as const,
+              label: t("project.deleteSelected", { count: selectedIds.size }),
+              icon: <Trash2 className="h-3.5 w-3.5" />,
+              onSelect: () => setBatchDeleteConfirm(true),
+            },
+          ]}
           labels={{
             hint: t("project.selectHint"),
             selected: t("project.selectedCount", { count: selectedIds.size }),
-            updateCenter: t("project.batchUpdateCenter", { count: selectedIds.size }),
-            updateProject: t("project.batchUpdateProject", { count: selectedIds.size }),
-            delete: t("project.deleteSelected", { count: selectedIds.size }),
-            enable: t("project.batchEnable", { count: selectedIds.size }),
-            disable: t("project.batchDisable", { count: selectedIds.size }),
             selectAll: t("project.selectAll"),
             deselectAll: t("project.deselectAll"),
             cancel: t("common.cancel"),
-            editTags: t("project.batchEditTags", { count: selectedTaggableSkills.length }),
+            more: t("mySkills.moreActions"),
           }}
-          onUpdateCenter={handleBatchUpdateCenter}
-          onUpdateProject={handleBatchUpdateProject}
-          onDelete={() => setBatchDeleteConfirm(true)}
-          onToggle={handleBatchToggleProject}
           onSelectAll={handleSelectAll}
           onCancel={exitMultiSelect}
-          onEditTags={selectedTaggableSkills.length > 0 ? () => setBatchTagDialogOpen(true) : undefined}
         />
       )}
 
@@ -1487,8 +1552,9 @@ export function ProjectDetail() {
 
       <BatchTagDialog
         open={batchTagDialogOpen}
-        skills={selectedTaggableSkills}
+        skills={selectedCenterSkills}
         allTags={allTags}
+        note={t("project.batchTagScopeNote")}
         onClose={() => setBatchTagDialogOpen(false)}
         onApply={handleBatchEditTags}
       />

@@ -452,7 +452,17 @@
       "clickToRemove": "点击标记为移除",
       "undoRemove": "点击保留此标签"
     },
-    "batchHeldBack": "有 {{count}} 个 skill 未更新——更新会删除文件（{{names}}）。逐个更新可以看到具体是哪些。"
+    "batchHeldBack": "有 {{count}} 个 skill 未更新——更新会删除文件（{{names}}）。逐个更新可以看到具体是哪些。",
+    "batchSyncAgents": "同步到 Agent ({{count}})",
+    "batchSynced": "已同步 {{count}} 项到 Agent",
+    "batchSyncFailed": "{{count}} 项同步失败",
+    "batchSyncDialog": {
+      "title": "把 {{count}} 个 Skill 同步到 Agent",
+      "description": "勾选目标 Agent，只会补齐尚未同步的 Skill。取消同步请在卡片的 Agent 图标上单独操作。",
+      "apply": "同步 {{count}} 项",
+      "noAgents": "没有已安装并启用的 Agent。",
+      "allSynced": "选中的 Skill 都已同步到这个 Agent"
+    }
   },
   "install": {
     "title": "安装 Skills",
@@ -981,7 +991,8 @@
     "skillDirectoryNotFound": "未找到 Skill 目录",
     "batchEditTags": "标签 ({{count}})",
     "batchTagsUpdated": "已更新 {{count}} 个中心 Skill 的标签",
-    "batchTagsFailed": "{{count}} 个中心 Skill 标签更新失败"
+    "batchTagsFailed": "{{count}} 个中心 Skill 标签更新失败",
+    "batchTagScopeNote": "标签保存在中央技能库里，改动会影响所有使用这个 Skill 的项目。只属于本项目的本地 Skill 不会被修改。"
   },
   "presetActions": {
     "button": "应用 Preset",
@@ -1077,7 +1088,11 @@
         "localNewer": "本地有变更",
         "centerNewer": "中心有变更",
         "diverged": "冲突"
-      }
+      },
+      "deleteLocalSelected": "永久删除 {{count}} 个",
+      "deleteLocalBatchConfirm": "永久删除 {{agent}} 里的 {{count}} 个本地 Skill？这些 Skill 只存在于该 Agent 目录，删除后无法恢复。",
+      "deletedLocalBatch": "已删除 {{count}} 个本地 Skill",
+      "deleteLocalBatchFailed": "{{count}} 个本地 Skill 删除失败"
     }
   }
 }
