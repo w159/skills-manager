@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-09-06
+
+### Release Overview
+- Batch operations reworked: bulk sync to agents, bulk removal in the global and lobster workspaces, and two selection defects that made the buttons act on more than they said.
+
+### User-facing
+- Selecting skills and then changing a filter no longer leaves an invisible selection behind. Selecting ten skills, switching to another tag and pressing delete used to act on the nine that had scrolled out of the filter. The selection is now trimmed to what is on screen when the filter changes, and cleared when you switch project or agent.
+- The enable/disable button now counts what it will actually change. With 23 of 30 selected skills already enabled, it said "Enable 30" and then reported "7 enabled".
+- New: sync a batch of skills to one or more agents from the library, instead of opening each skill's detail panel. The dialog shows how many of the selection each agent already has, and only adds the missing ones.
+- New: select mode in the global and lobster workspaces, which had none. "Remove" is kept as two separate buttons there, because it means two different things: unsyncing a managed skill leaves the central copy intact, while deleting a local-only skill cannot be undone. Both confirmations list the affected skills by name.
+- Bulk tag edits and enable/disable now show progress and cannot be triggered twice by accident.
+- The toolbar keeps update and delete in the "…" menu, so the buttons on screen are the ones you reach for; delete no longer carries the same visual weight as an everyday action.
+- The select-mode entry moved out of the grid/list switcher, where it read as a third view, and now has a label.
+- Escape leaves select mode, and also closes the confirmation, tag and sync dialogs, which previously ignored it.
+- Editing tags from a project now says that tags live in the central library and reach every project using those skills.
+- Toolbar controls line up: search field, segmented controls and buttons were 36, 38, 40 and 42px tall next to each other, and are now all 40px. The Add Skill button also picks up the app's standard primary-button colouring.
+
+### Developer & Governance
+- `MultiSelectToolbar` takes an action list with three tones instead of twenty business-specific props, which is what makes the overflow menu and the workspace's two removal semantics expressible without a fourth variant.
+- `useMultiSelect` adjusts the selection during render rather than in an effect, per React's guidance and eslint's `react-hooks` rules, and derives the live selection from the current items so a deleted key cannot re-select a later item that reuses its path.
+- Toolbar sizing moved into `.app-toolbar-segmented` / `.app-toolbar-button` component classes; the sky, violet, amber and red-600 literals in the bulk toolbar and `CardActionMenu` were replaced with the repo's own tokens.
+- A set of workspace i18n keys that had been unreferenced since an earlier refactor is in use again for the bulk removal flow.
 ## [1.36.2] - 2026-09-05
 
 ### Release Overview
