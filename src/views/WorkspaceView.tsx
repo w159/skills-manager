@@ -921,14 +921,14 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t("globalWorkspace.localSkills.searchPlaceholder")}
-                className="app-input h-9 w-full rounded-md pl-8 font-medium"
+                className="app-input w-full pl-8 font-medium"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
               />
             </div>
 
-            <div className="app-segmented shrink-0">
+            <div className="app-segmented app-toolbar-segmented shrink-0">
               <button
                 onClick={() => void loadLocalSkills()}
                 disabled={localSkillsLoading}
@@ -961,10 +961,8 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
             <button
               onClick={() => isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true)}
               className={cn(
-                "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors outline-none",
-                isMultiSelect
-                  ? "border-border bg-surface-active text-secondary"
-                  : "border-border-subtle bg-surface text-muted hover:bg-surface-hover hover:text-secondary"
+                "app-toolbar-button app-toolbar-button-secondary",
+                isMultiSelect && "border-border bg-surface-active text-secondary hover:bg-surface-active"
               )}
             >
               <SquareCheck className="h-4 w-4" />
@@ -973,7 +971,7 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
 
             <button
               onClick={() => setAddDialogOpen(true)}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover"
+              className="app-toolbar-button app-toolbar-button-primary"
             >
               <Plus className="h-3.5 w-3.5" />
               {t("globalWorkspace.addSkill")}

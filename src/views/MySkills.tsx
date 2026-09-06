@@ -1133,7 +1133,7 @@ export function MySkills() {
             />
           </div>
 
-          <div className="app-segmented">
+          <div className="app-segmented app-toolbar-segmented">
             {(["all", "enabled", "available"] as const).map((mode) => (
               <button
                 key={mode}
@@ -1150,7 +1150,7 @@ export function MySkills() {
 
         </div>
 
-        <div className="app-segmented">
+        <div className="app-segmented app-toolbar-segmented">
           {(() => {
             const mode = getGitToolbarMode();
             const meta = getGitStatusMeta(mode);
@@ -1210,10 +1210,8 @@ export function MySkills() {
         <button
           onClick={() => isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true)}
           className={cn(
-            "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors outline-none",
-            isMultiSelect
-              ? "border-border bg-surface-active text-secondary"
-              : "border-border-subtle bg-surface text-muted hover:bg-surface-hover hover:text-secondary"
+            "app-toolbar-button app-toolbar-button-secondary",
+            isMultiSelect && "border-border bg-surface-active text-secondary hover:bg-surface-active"
           )}
         >
           <SquareCheck className="h-4 w-4" />
